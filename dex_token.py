@@ -1,17 +1,6 @@
 def dex_token() :
-    #Convenience
-    I = importlib
-
     balances = Hash(default_value=0)
     symbol = Variable()
-
-    token_interface = [
-        I.Func('transfer', args=('amount', 'to')),
-        I.Func('balance_of', args=('account')),
-        I.Func('allowance', args=('owner', 'spender')),
-        I.Func('approve', args=('amount', 'to')),
-        I.Func('transfer_from', args=('amount', 'to', 'main_account')),
-    ]
 
     #Cannot set breakpoint in @construct
     @construct
