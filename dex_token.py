@@ -1,15 +1,28 @@
-from contracting.client import ContractingClient
-client = ContractingClient()
+def dex_token() :
+    #Convenience
+    I = importlib
 
-def token():
     balances = Hash(default_value=0)
+    symbol = Variable()
 
+    token_interface = [
+        I.Func('transfer', args=('amount', 'to')),
+        I.Func('balance_of', args=('account')),
+        I.Func('allowance', args=('owner', 'spender')),
+        I.Func('approve', args=('amount', 'to')),
+        I.Func('transfer_from', args=('amount', 'to', 'main_account')),
+    ]
+
+    #Cannot set breakpoint in @construct
     @construct
-    def seed(vk: str):
-        balances[vk] = 288_090_567
-        balances['ETH'] = 100_000_000
-        balances['BTC'] = 100_000_000
-        balances['DOGE'] = 100_000_000
+    def seed(vk: str, s_symbol: str):
+        # Overloading this to mint tokens
+        balances[vk] = 100
+        symbol.set(s_symbol)
+
+    @export
+    def symbol():
+        return symbol.get()
 
     @export
     def transfer(amount: float, to: str):
@@ -52,4 +65,3 @@ def token():
         balances[main_account] -= amount
 
         balances[to] += amount
-

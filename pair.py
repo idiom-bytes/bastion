@@ -40,39 +40,3 @@
 # 		return currency.balance_of(ctx.this) / token_module.balance_of(ctx.this)
 # 	else:
 # 		return token_module.balance_of(ctx.this) / return currency.balance_of(ctx.this)
-#
-#
-#
-#
-# @export
-# def buy(str token_contract, float amount):
-# 	validate_args(token_contract, amount)
-#
-# 	# Make sure that what is imported is actually a valid token
-# 	token = importlib.import_module(token_contract)
-# 	assert token_interface.matches(token)
-#
-# 	price_1 = amount / get_price(token)
-# 	price_2 = ...
-#
-# 	avg_price = (price_1 + price_2) / 2
-#
-# 	purchase_tokens(avg_price, amount)
-#
-#
-# @export
-# def sell(str token_contract, float amount):
-# 	assert S[token_id] is not None, 'Invalid token ID!'
-#
-# 	validate_args(token_contract, amount)
-#
-# 	# Make sure that what is imported is actually a valid token
-# 	token = importlib.import_module(token_contract)
-# 	assert token_interface.matches(token)
-#
-# 	price_1 = amount / get_price(token, buy_side=False)
-# 	price_2 = ...
-#
-# 	avg_price = (price_1 + price_2) / 2
-#
-# 	sell_tokens(avg_price, amount)
