@@ -34,11 +34,14 @@ def dex() :
     #         return token.balance_of(ctx.this) / Pairs[currency, token, 'tau_reserve']
 
     @export
-    def create_pair(token_contract: str, tau_amount: int, token_amount: int):
+    def create_pair(tau_contract: str, token_contract: str, tau_amount: int, token_amount: int):
         assert token_amount > 0
         assert tau_amount > 0
 
         # Make sure that what is imported is actually a valid token
+        tau = I.import_module(tau_contract)
+        assert I.enforce_interface(tau, token_interface), 'Token contract does not meet the required interface'
+
         token = I.import_module(token_contract)
         assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
 
