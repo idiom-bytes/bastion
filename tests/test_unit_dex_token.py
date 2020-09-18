@@ -2,7 +2,6 @@ from unittest import TestCase
 
 from contracting.client import ContractingClient
 from dex_token import dex_token
-from dex import dex
 
 class MyTestCase(TestCase):
 
@@ -21,13 +20,6 @@ class MyTestCase(TestCase):
             's_symbol': 'ETH'
         })
 
-        self.client.submit(dex_token, 'Antiample', constructor_args={
-            'vk': 'actor1',
-            's_symbol': 'XAMP'
-        })
-
-        self.client.submit(dex)
-
     def test_step1_assign_tokens(self):
         # Get 2 token contracts
         token0 = self.client.get_contract('Lamden')
@@ -41,25 +33,3 @@ class MyTestCase(TestCase):
         self.assertEqual(token1.name, 'Ethereum')
         self.assertEqual(token1.symbol(), 'ETH')
         self.assertEqual(token1.quick_read('balances', 'actor1'), 100)
-
-    def test_step2_create_pair(self):
-        dex = self.client.get_contract('dex')
-
-        n_pairs_before = dex.get_length_pairs()
-        #
-        # dex.create_pair(
-        #     tau_contract = 'Tau',
-        #     token_contract = 'Ethereum',
-        #     tau_amount= 50,
-        #     token_amount = 50
-        # )
-        # dex.create_pair(
-        #     tau_contract = 'Tau',
-        #     token_contract = 'Antiample',
-        #     tau_amount= 50,
-        #     token_amount = 50
-        # )
-        #
-        n_pairs_after = dex.get_length_pairs()
-
-        assert n_pairs_after > n_pairs_before
