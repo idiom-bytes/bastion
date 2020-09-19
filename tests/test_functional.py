@@ -46,20 +46,20 @@ class MyTestCase(TestCase):
         dex = self.client.get_contract('dex')
 
         n_pairs_before = dex.get_length_pairs()
-        #
-        # dex.create_pair(
-        #     tau_contract = 'Tau',
-        #     token_contract = 'Ethereum',
-        #     tau_amount= 50,
-        #     token_amount = 50
-        # )
-        # dex.create_pair(
-        #     tau_contract = 'Tau',
-        #     token_contract = 'Antiample',
-        #     tau_amount= 50,
-        #     token_amount = 50
-        # )
-        #
+
+        dex.create_pair(
+            tau_contract = 'Tau',
+            token_contract = 'Ethereum',
+            tau_amount= 50,
+            token_amount = 50
+        )
+        dex.create_pair(
+            tau_contract = 'Tau',
+            token_contract = 'Antiample',
+            tau_amount= 50,
+            token_amount = 50
+        )
+
         n_pairs_after = dex.get_length_pairs()
 
         assert n_pairs_after > n_pairs_before
