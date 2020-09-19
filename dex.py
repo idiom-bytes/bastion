@@ -40,6 +40,7 @@ def dex() :
 
     # Only one token, and
     # Returns slippage, rates, etc..
+    # X*Y=Z
     def get_trade_details(tau, token, tau_out, token_out):
         # Let's calculate slippage
         # And how much you get out from the trade
@@ -49,19 +50,20 @@ def dex() :
         lp_total = tau_reserve * token_reserve
 
         # Calculate new reserve based on what was passed in
-        tau_reserve_new = tau_in > 0 ? tau_reserve + tau_in: 0
-        token_reserve_new = token_in > 0 ? token_reserve + token_in: 0
+        tau_reserve_new = tau_reserve + tau_in if tau_in > 0 else 0
+        token_reserve_new = token_reserve + token_in if token_in > 0 else 0
 
         # Calculate remaining reserve
-        tau_reserve_new = token_in > 0 ? lp_total / token_reserve_new: tau_reserve_new
-        token_reserve_new = tau_in > 0 ? lp_total / tau_reserve_new: token_reserve_new
+        tau_reserve_new = lp_total / token_reserve_new if token_in > 0 else tau_reserve_new
+        token_reserve_new = lp_total / tau_reserve_new if tau_in > 0 else token_reserve_new
 
         # Calculate how much will be removed
-        tau_out = token_in > 0 ? tau_reserve - tau_reserve_new: 0
-        token_out = tau_in > 0 ? token_reserve - token_reserve_new: 0
+        tau_out = tau_reserve - tau_reserve_new if token_in > 0 else 0
+        token_out = token_reserve - token_reserve_new if tau_in > 0  else 0
 
-        tau_slippage = token_in > 0 ? tau_reserve / tau_reserve_new: 0
-        token_slippage = tau_in > 0 ? token_reserve / token_reserve_new: 0
+        # Finally, calculate the slippage incurred
+        tau_slippage = tau_reserve / tau_reserve_new if token_in > 0 else 0
+        token_slippage = token_reserve / token_reserve_new  if tau_in > 0 else 0
 
         return tau_out, token_out, tau_slippage, token_slippage
 
@@ -114,14 +116,14 @@ def dex() :
         tau_balance = tau.balance_of(this.ctx)
         token_balance = token.balance_of(this.ctx)
 
-        tau_in = tau_balance > tau_reserve - tau_out ? tau_balance - (tau_reserve - tau_out) : 0
-        token_in = token_balance > token_reserve - token_out ? token_balance - (token_reserve - token_out) : 0
+        tau_in = tau_balance - (tau_reserve - tau_out) if tau_balance > tau_reserve - tau_out else 0
+        token_in = token_balance - (token_reserve - token_out) if token_balance > token_reserve - token_out else 0
 
         assert tau_in > 0 or token_in > 0, 'UniswapV2: Insufficient Input Amount'
 
         # TODO - A1/A2 - Deconstruct Curve Adjustment Calculation
         # ... I'm not sure why balances are being multiplied by 1000, then 3...
-        # I'm guessing this has something to do with smooth the balance curve
+        # I'm guessing this has something to do with smoothing the balance curve
         tau_balance_adjusted = (tau_balance*1000) - (tau_in*3)
         token_balance_adjusted = (token_balance*1000) - (token_in*3)
 
@@ -130,7 +132,7 @@ def dex() :
         # TODO - A1/A2 - Implement update function
         update(tau_balance, token_balance, tau_reserve, token_reserve)
 
-        # TODO - B1 - Event Emitters?
+        # TODO - B2 - Event Emitters?
         # emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
 
     # Simple getter
@@ -148,7 +150,7 @@ def dex() :
         assert Pairs[tau_contract, token_contract, 'tau_reserve'] > 0
         assert Pairs[tau_contract, token_contract, 'token_reserve'] > 0
 
-        tau_reserve_new, token_reserve_new, tau_out, token_out, tau_slippage, token_slippage
+        tau_reserve_new, token_reserve_new, tau_out, token_out, tau_slippage, token_slippage = get_trade_details()
 
         tau, token = get_interface(tau_contract, token_contract)
         swap(tau_contract, token_contract, tau_out, token_out)
