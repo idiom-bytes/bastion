@@ -2,7 +2,7 @@ def dex_token() :
     balances = Hash(default_value=0)
     symbol = Variable()
 
-    #Cannot set breakpoint in @construct
+    # Cannot set breakpoint in @construct
     @construct
     def seed(vk: str, s_symbol: str):
         # Overloading this to mint tokens
