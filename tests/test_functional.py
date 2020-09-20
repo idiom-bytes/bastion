@@ -394,7 +394,7 @@ class MyTestCase(TestCase):
         n_pairs_after = dex.get_length_pairs()
         assert n_pairs_after > n_pairs_before
 
-    def test_3_dex_trades(self):
+    def test_3_dex_swap(self):
         token0 = self.client.get_contract('lamden')
         token1 = self.client.get_contract('ethereum')
         dex = self.client.get_contract('dex')
