@@ -8,11 +8,11 @@ def tau() :
 
     # Cannot set breakpoint in @construct
     @construct
-    def seed(s_name:str, s_symbol: str, vk: str):
+    def seed(s_name:str, s_symbol: str, vk: str, vk_amount: int):
         # Overloading this to mint tokens
         token_name.set(s_name)
         token_symbol.set(s_symbol)
-        balances[vk] = 100
+        balances[vk] = vk_amount
 
     @export
     def token_name():
@@ -82,11 +82,11 @@ def eth() :
 
     # Cannot set breakpoint in @construct
     @construct
-    def seed(s_name:str, s_symbol: str, vk: str):
+    def seed(s_name:str, s_symbol: str, vk: str, vk_amount: int):
         # Overloading this to mint tokens
         token_name.set(s_name)
         token_symbol.set(s_symbol)
-        balances[vk] = 100
+        balances[vk] = vk_amount
 
     @export
     def token_name():
@@ -186,6 +186,36 @@ def dex() :
         return pairs[tau_contract, token_contract, 'tau_reserve'], \
                 pairs[tau_contract, token_contract, 'token_reserve']
 
+    # Pass contracts + tokens_in, get: tokens_out, slippage
+    @export
+    def get_trade_details(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+        # Let's calculate slippage
+        # And how much you get out from the trade
+
+        # First we need to get tau + token reserve
+        tau_reserve = pairs[tau_contract, token_contract, 'tau_reserve']
+        token_reserve = pairs[tau_contract, token_contract, 'token_reserve']
+
+        lp_total = tau_reserve * token_reserve
+
+        # Calculate new reserve based on what was passed in
+        tau_reserve_new = tau_reserve + tau_in if tau_in > 0 else 0
+        token_reserve_new = token_reserve + token_in if token_in > 0 else 0
+
+        # Calculate remaining reserve
+        tau_reserve_new = lp_total / token_reserve_new if token_in > 0 else tau_reserve_new
+        token_reserve_new = lp_total / tau_reserve_new if tau_in > 0 else token_reserve_new
+
+        # Calculate how much will be removed
+        tau_out = tau_reserve - tau_reserve_new if token_in > 0 else 0
+        token_out = token_reserve - token_reserve_new if tau_in > 0  else 0
+
+        # Finally, calculate the slippage incurred
+        tau_slippage = (tau_reserve / tau_reserve_new) -1 if token_in > 0 else 0
+        token_slippage = (token_reserve / token_reserve_new) -1 if tau_in > 0 else 0
+
+        return tau_out, token_out, tau_slippage, token_slippage
+
     @export
     def create_pair(tau_contract: str, token_contract: str, tau_amount: int, token_amount: int):
         assert token_amount > 0
@@ -229,13 +259,15 @@ class MyTestCase(TestCase):
         self.client.submit(tau, 'lamden', constructor_args={
             's_name': 'lamden',
             's_symbol': 'TAU',
-            'vk': 'sys'
+            'vk': 'sys',
+            'vk_amount': 100
         })
 
         self.client.submit(eth, 'ethereum', constructor_args={
             's_name': 'ethereum',
             's_symbol': 'ETH',
-            'vk': 'sys'
+            'vk': 'sys',
+            'vk_amount': 100
         })
 
         self.client.submit(dex)
@@ -256,7 +288,7 @@ class MyTestCase(TestCase):
         self.assertEqual(token1.quick_read('balances', 'sys'), 100)
         self.assertEqual(token1.balance_of(account = 'sys'), 100)
 
-    def test_step2_dex_pair(self):
+    def test_step2_dex_create_pair(self):
         token0 = self.client.get_contract('lamden')
         token1 = self.client.get_contract('ethereum')
         dex = self.client.get_contract('dex')
@@ -266,22 +298,45 @@ class MyTestCase(TestCase):
         caller, signer, this = dex.create_pair(
             tau_contract = 'lamden',
             token_contract = 'ethereum',
-            tau_amount= 50,
-            token_amount = 50
+            tau_amount= 10,
+            token_amount = 10
         )
 
-        self.assertEqual(token0.balance_of(account='sys'), 50)
-        self.assertEqual(token0.balance_of(account='dex'), 50)
+        self.assertEqual(token0.balance_of(account='sys'), 90)
+        self.assertEqual(token0.balance_of(account='dex'), 10)
 
-        self.assertEqual(token1.balance_of(account='sys'), 50)
-        self.assertEqual(token1.balance_of(account='dex'), 50)
+        self.assertEqual(token1.balance_of(account='sys'), 90)
+        self.assertEqual(token1.balance_of(account='dex'), 10)
 
         tau_reserve, token_reserve = dex.get_reserves(
             tau_contract = 'lamden',
             token_contract = 'ethereum'
         )
-        self.assertEqual(tau_reserve, 50)
-        self.assertEqual(token_reserve, 50)
+        self.assertEqual(tau_reserve, 10)
+        self.assertEqual(token_reserve, 10)
 
         n_pairs_after = dex.get_length_pairs()
         assert n_pairs_after > n_pairs_before
+
+    def test_step2_dex_trade_1(self):
+        token0 = self.client.get_contract('lamden')
+        token1 = self.client.get_contract('ethereum')
+        dex = self.client.get_contract('dex')
+
+        caller, signer, this = dex.create_pair(
+            tau_contract='lamden',
+            token_contract='ethereum',
+            tau_amount=10,
+            token_amount=10
+        )
+
+        tau_out, token_out, tau_slippage, token_slippage = dex.get_trade_details(
+            tau_contract='lamden',
+            token_contract='ethereum',
+            tau_in=1,
+            token_in=0
+        )
+
+        assert tau_out == 0
+        assert round(token_out,6) == 0.909091
+        assert round(token_slippage, 2) * 100 == 10.00
