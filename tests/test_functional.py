@@ -64,6 +64,8 @@ def tau() :
         balances[from_address] -= amount
         balances[to_address] += amount
 
+
+
 def eth() :
     balances = Hash(default_value=0)
     token_name = Variable()
@@ -125,6 +127,8 @@ def eth() :
         # TODO - A1 - Trying to understand this currency.py vs. function in general...
         balances[from_address] -= amount
         balances[to_address] += amount
+
+
 
 def dex() :
     # Illegal use of a builtin
@@ -313,7 +317,13 @@ def dex() :
 
         pairs['count'] += 1
 
+        # I was returning this so I could better understand the sequence of events
+        # Basically, I could not override client.signer = 'actor1'
+        # In addition, downstream calls to tokens would not work due to their implementation
+        # I.E. They are using ctx.caller vs. ctx.signer
         return ctx.caller, ctx.signer, ctx.this
+
+
 
 class MyTestCase(TestCase):
 
