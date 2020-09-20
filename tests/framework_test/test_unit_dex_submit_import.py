@@ -3,6 +3,7 @@ from contracting.client import ContractingClient
 from dex_sample import dex_sample
 
 # TODO - This test should be compared to test_unit_dex_token_submit_import.py
+# dex_sample.symbol() function cannot be found in attributes, inside executor.py
 class MyTestCase(TestCase):
 
     def setUp(self):
