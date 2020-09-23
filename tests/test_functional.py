@@ -64,8 +64,6 @@ def tau() :
         balances[from_address] -= amount
         balances[to_address] += amount
 
-
-
 def eth() :
     balances = Hash(default_value=0)
     token_name = Variable()
@@ -248,22 +246,24 @@ def dex() :
     def seed():
         pairs['count'] = 0
 
-    # Simple getter
     @export
+    # Number of pairs created
     def get_length_pairs():
         return pairs['count']
 
     @export
+    # Returns the total reserves from each tau/token
     def get_reserves(tau_contract:str, token_contract:str):
         return pairs[tau_contract, token_contract, 'tau_reserve'], \
                 pairs[tau_contract, token_contract, 'token_reserve']
 
-    # Pass contracts + tokens_in, get: tokens_out, slippage
     @export
+    # Pass contracts + tokens_in, get: tokens_out, slippage
     def get_trade_details(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
         return calculate_trade_details(tau_contract, token_contract, tau_in, token_in)
 
     @export
+    # Swap tau or tokens
     def token_swap(tau_contract: str, token_contract: str, tau_in: float, token_in: float, to: str):
         assert tau_in > 0 or token_in > 0, 'Invalid amount!'
         assert not (tau_in > 0 and token_in > 0), 'Swap only accepts one currecy!'
@@ -290,7 +290,8 @@ def dex() :
         swap(tau, token, tau_out, token_out, to)
 
     @export
-    def create_pair(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+    # Pair must exist before liquidity can be added
+    def add_liquidity(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
         assert token_in > 0
         assert tau_in > 0
 
@@ -298,12 +299,20 @@ def dex() :
         tau, token = get_interface(tau_contract, token_contract)
 
         assert tau_contract != token_contract
-        assert pairs[tau_contract, token_contract] is None, 'Market already exists!'
+        assert not pairs[tau_contract, token_contract] is None, 'Market does not exist!'
 
         # 1 - This contract will own all amounts sent to it
         tau.transfer(tau_in, ctx.this)
         token.transfer(token_in, ctx.this)
-        pairs[tau_contract, token_contract] = token_contract
+
+        # Track liquidity provided by signer
+        # TODO - If we care about "% pool" This needs to remain updated as market swings along X,Y
+        if pairs[tau_contract, token_contract, ctx.signer] is None :
+            pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] = tau_in
+            pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] = token_in
+        else :
+            pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] += tau_in
+            pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] += token_in
 
         # I'm assuming registry of [ctx.this,ctx.investor,amount] is done via LP
         update(
@@ -315,15 +324,22 @@ def dex() :
             pairs[tau.token_name(), token.token_name(), 'token_reserve']
         )
 
+    @export
+    # Create pair before doing anything else
+    def create_pair(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+        # Make sure that what is imported is actually a valid token
+        tau, token = get_interface(tau_contract, token_contract)
+
+        assert tau_contract != token_contract
+        assert pairs[tau_contract, token_contract] is None, 'Market already exists!'
+
+        # 1 - Create the pair
+        pairs[tau_contract, token_contract] = token_contract
         pairs['count'] += 1
 
-        # I was returning this so I could better understand the sequence of events
-        # Basically, I could not override client.signer = 'actor1'
-        # In addition, downstream calls to tokens would not work due to their implementation
-        # I.E. They are using ctx.caller vs. ctx.signer
-        return ctx.caller, ctx.signer, ctx.this
-
-
+        # 2 - Adds liquidity if provided
+        if (not tau_in is None and tau_in > 0) and (not token_in is None and token_in > 0) :
+            add_liquidity(tau_contract, token_contract, tau_in, token_in)
 
 class MyTestCase(TestCase):
 
@@ -331,110 +347,233 @@ class MyTestCase(TestCase):
         self.client = ContractingClient()
         self.client.flush()
 
-        # Currently mocking Lamdem functionality w/ dex_token vs. dealing with currency.py
+        # Currently mocking Lamdem functionality w/ inline tokens
         self.client.submit(tau, 'lamden', constructor_args={
             's_name': 'lamden',
             's_symbol': 'TAU',
-            'vk': 'sys',
-            'vk_amount': 100
+            'vk': 'actor1',
+            'vk_amount': 15
         })
 
         self.client.submit(eth, 'ethereum', constructor_args={
             's_name': 'ethereum',
             's_symbol': 'ETH',
-            'vk': 'sys',
-            'vk_amount': 100
+            'vk': 'actor1',
+            'vk_amount': 15
         })
 
-        self.client.submit(dex)
+        self.client.submit(dex, 'dex')
 
+
+    def change_signer(self, name):
+        self.client.signer = name
+
+        self.lamden = self.client.get_contract('lamden')
+        self.ethereum = self.client.get_contract('ethereum')
+        self.dex = self.client.get_contract('dex')
+
+    # Unit Test designed around
+    # UniV2
+    # X+Y=Z AMMs - https://ethresear.ch/t/improving-front-running-resistance-of-x-y-k-market-makers/1281
     def test_1_token_interfaces(self):
-        # Get 2 token contracts
-        token0 = self.client.get_contract('lamden')
-        token1 = self.client.get_contract('ethereum')
+        self.change_signer('actor1')
 
         # get balances
-        self.assertEqual(token0.token_name(), 'lamden')
-        self.assertEqual(token0.token_symbol(), 'TAU')
-        self.assertEqual(token0.quick_read('balances', 'sys'), 100)
-        self.assertEqual(token0.balance_of(account='sys'), 100)
+        self.assertEqual(self.lamden.token_name(), 'lamden')
+        self.assertEqual(self.lamden.token_symbol(), 'TAU')
+        self.assertEqual(self.lamden.quick_read('balances', 'actor1'), 15)
+        self.assertEqual(self.lamden.balance_of(account='actor1'), 15)
 
-        self.assertEqual(token1.token_name(), 'ethereum')
-        self.assertEqual(token1.token_symbol(), 'ETH')
-        self.assertEqual(token1.quick_read('balances', 'sys'), 100)
-        self.assertEqual(token1.balance_of(account = 'sys'), 100)
+        self.assertEqual(self.ethereum.token_name(), 'ethereum')
+        self.assertEqual(self.ethereum.token_symbol(), 'ETH')
+        self.assertEqual(self.ethereum.quick_read('balances', 'actor1'), 15)
+        self.assertEqual(self.ethereum.balance_of(account = 'actor1'), 15)
 
     def test_2_dex_create_pair(self):
-        token0 = self.client.get_contract('lamden')
-        token1 = self.client.get_contract('ethereum')
-        dex = self.client.get_contract('dex')
+        self.change_signer('actor1')
 
-        n_pairs_before = dex.get_length_pairs()
+        n_pairs_before = self.dex.get_length_pairs()
 
-        caller, signer, this = dex.create_pair(
+        # Optionally => Pass in tau_in and token_in
+        self.dex.create_pair(
             tau_contract = 'lamden',
             token_contract = 'ethereum',
-            tau_in= 10,
-            token_in = 10
+            tau_in=10,
+            token_in=10
         )
 
-        self.assertEqual(token0.balance_of(account='sys'), 90)
-        self.assertEqual(token0.balance_of(account='dex'), 10)
+        # Verify pairs increased
+        n_pairs_after = self.dex.get_length_pairs()
+        assert n_pairs_after > n_pairs_before
 
-        self.assertEqual(token1.balance_of(account='sys'), 90)
-        self.assertEqual(token1.balance_of(account='dex'), 10)
 
-        tau_reserve, token_reserve = dex.get_reserves(
+        # The dex should now own 10 of each
+        self.assertEqual(self.lamden.balance_of(account='actor1'), 5)
+        self.assertEqual(self.lamden.balance_of(account='dex'), 10)
+
+        self.assertEqual(self.ethereum.balance_of(account='actor1'), 5)
+        self.assertEqual(self.ethereum.balance_of(account='dex'), 10)
+
+        # Verify reserves are in place
+        tau_reserve, token_reserve = self.dex.get_reserves(
             tau_contract = 'lamden',
             token_contract = 'ethereum'
         )
+
         self.assertEqual(tau_reserve, 10)
         self.assertEqual(token_reserve, 10)
 
-        n_pairs_after = dex.get_length_pairs()
-        assert n_pairs_after > n_pairs_before
+    def test_3_dex_review_trade(self):
+        self.change_signer('actor1')
 
-    def test_3_dex_swap(self):
-        token0 = self.client.get_contract('lamden')
-        token1 = self.client.get_contract('ethereum')
-        dex = self.client.get_contract('dex')
+        # CREATE MARKET + ADD LIQUIDITY
+        # Create pair (this will be owned by the dex)
+        self.dex.create_pair(
+            tau_contract='lamden',
+            token_contract='ethereum'
+        )
 
-        dex.create_pair(
+        # Add liquidity
+        self.dex.add_liquidity(
             tau_contract='lamden',
             token_contract='ethereum',
             tau_in=10,
             token_in=10
         )
 
-        tau_out, token_out, tau_slippage, token_slippage = dex.get_trade_details(
+        # TRADE NUMBER 1 - Check trade details
+        # Miner spends one unit of A: (11, 9.090909), gets 0.909091 units of B
+        tau_out, token_out, tau_slippage, token_slippage = self.dex.get_trade_details(
             tau_contract='lamden',
             token_contract='ethereum',
             tau_in=1,
             token_in=0
         )
 
+        # Review trade details are correct
         assert tau_out == 0
-        assert round(token_out,6) == 0.909091
+        assert round(token_out, 6) == 0.909091
         assert round(token_slippage, 2) * 100 == 10.00
 
-        dex.token_swap(
+    def test_4_dex_swap(self):
+        self.change_signer('actor1')
+
+        # Distribute currencies to other actors
+        self.lamden.transfer(amount = 1, to = 'miner')
+        self.lamden.transfer(amount = 1, to = 'buyer')
+
+        # CREATE MARKET + ADD LIQUIDITY
+        # Create pair (this will be owned by the dex)
+        self.dex.create_pair(
+            tau_contract='lamden',
+            token_contract='ethereum'
+        )
+
+        # Add liquidity
+        self.dex.add_liquidity(
+            tau_contract='lamden',
+            token_contract='ethereum',
+            tau_in = 10,
+            token_in = 10
+        )
+
+        # TRADE NUMBER 1 - MINER
+        # Miner spends one unit of A: (11, 9.090909), gets 0.909091 units of B
+        self.change_signer('miner')
+        self.dex.token_swap(
             tau_contract = 'lamden',
             token_contract = 'ethereum',
             tau_in = 1,
             token_in = 0,
-            to = 'sys'
+            to = 'miner'
         )
 
-        tau_reserve, token_reserve = dex.get_reserves(
+        # Validate Balances + AMM Reserves Post-Swap
+        miner_balance_tau = self.lamden.balance_of(account='miner')
+        self.assertEqual(miner_balance_tau, 0)
+        miner_balance_eth = round(float(str(self.ethereum.balance_of(account='miner'))),6)
+        self.assertEqual(miner_balance_eth, 0.909091)
+
+        dex_balance_tau = self.lamden.balance_of(account='dex')
+        self.assertEqual(dex_balance_tau, 11)
+        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
+        self.assertEqual(dex_balance_eth, 9.090909)
+
+        # Get remaining reserves
+        tau_reserve, token_reserve = self.dex.get_reserves(
             tau_contract = 'lamden',
             token_contract = 'ethereum'
         )
 
-        self.assertEqual(token0.balance_of(account='sys'), 89)
-        self.assertEqual(round(float(str(token1.balance_of(account='sys'))),6), 90.909091)
+        tau_reserve = round(float(str(tau_reserve)), 2)
+        self.assertEqual(tau_reserve, 11.0)
+        token_reserve = round(float(str(token_reserve)), 6)
+        self.assertEqual(token_reserve, 9.090909)
 
-        self.assertEqual(token0.balance_of(account='dex'), 11)
-        self.assertEqual(round(float(str(token1.balance_of(account='dex'))), 6), 9.090909)
 
-        self.assertEqual(tau_reserve, 11)
-        self.assertEqual(round(float(str(token_reserve)), 6), 9.090909)
+        # TRADE NUMBER 2 - BUYER
+        self.change_signer('buyer')
+
+        self.dex.token_swap(
+            tau_contract = 'lamden',
+            token_contract = 'ethereum',
+            tau_in = 1,
+            token_in = 0,
+            to = 'buyer'
+        )
+
+        # Validate Balances + AMM Reserves Post-Swap
+        buyer_balance_tau = self.lamden.balance_of(account='buyer')
+        self.assertEqual(buyer_balance_tau, 0)
+        buyer_balance_eth = round(float(str(self.ethereum.balance_of(account='buyer'))),6)
+        self.assertEqual(buyer_balance_eth, 0.757576)
+
+        dex_balance_tau = self.lamden.balance_of(account='dex')
+        self.assertEqual(dex_balance_tau, 12)
+        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
+        self.assertEqual(dex_balance_eth, 8.333333)
+
+        # Get remaining reserves
+        tau_reserve, token_reserve = self.dex.get_reserves(
+            tau_contract = 'lamden',
+            token_contract = 'ethereum'
+        )
+
+        tau_reserve = round(float(str(tau_reserve)), 2)
+        self.assertEqual(tau_reserve, 12.0)
+        token_reserve = round(float(str(token_reserve)), 6)
+        self.assertEqual(token_reserve, 8.333333)
+
+
+        # TRADE NUMBER 3 - MINER
+        self.change_signer('miner')
+
+        self.dex.token_swap(
+            tau_contract='lamden',
+            token_contract='ethereum',
+            tau_in=0,
+            token_in=0.757576,
+            to='miner'
+        )
+
+        # Validate Balances + AMM Reserves Post-Swap
+        miner_balance_tau = round(float(str(self.lamden.balance_of(account='miner'))), 2)
+        self.assertEqual(miner_balance_tau, 1.0)
+        miner_balance_eth = round(float(str(self.ethereum.balance_of(account='miner'))), 6)
+        self.assertEqual(miner_balance_eth, 0.151515)
+
+        dex_balance_tau = round(float(str(self.lamden.balance_of(account='dex'))),2)
+        self.assertEqual(dex_balance_tau, 11.0)
+        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
+        self.assertEqual(dex_balance_eth, 9.090909)
+
+        # Get remaining reserves
+        tau_reserve, token_reserve = self.dex.get_reserves(
+            tau_contract='lamden',
+            token_contract='ethereum'
+        )
+
+        tau_reserve = round(float(str(tau_reserve)), 2)
+        self.assertEqual(tau_reserve, 11.0)
+        token_reserve = round(float(str(token_reserve)), 6)
+        self.assertEqual(token_reserve, 9.090909)
