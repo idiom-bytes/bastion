@@ -26,7 +26,7 @@ def dex() :
             return token.balance_of(ctx.this) / Pairs[tau.name, token.name, 'tau_reserve']
 
     # Get token modules, validate & return
-    def get_interface(tau_contract, token_contract):
+    def get_token_interface(tau_contract, token_contract):
         assert Pairs[tau_contract, token_contract] is not None, 'Invalid token ID!'
 
         # Make sure that what is imported is actually a valid token
@@ -95,7 +95,7 @@ def dex() :
 
         assert not (tau_out > 0 and token_out > 0), 'Two coin Outputs'
         assert tau_out > 0 or token_out > 0, 'Insufficient Ouput Amount'
-        tau, token = get_interface(tau_contract, token_contract)
+        tau, token = get_token_interface(tau_contract, token_contract)
 
         tau_reserve = Pairs[tau.name, token.name, 'tau_reserve']
         token_reserve = Pairs[tau.name, token.name, 'token_reserve']
@@ -152,7 +152,7 @@ def dex() :
 
         tau_reserve_new, token_reserve_new, tau_out, token_out, tau_slippage, token_slippage = get_trade_details()
 
-        tau, token = get_interface(tau_contract, token_contract)
+        tau, token = get_token_interface(tau_contract, token_contract)
         swap(tau_contract, token_contract, tau_out, token_out)
 
     @export
