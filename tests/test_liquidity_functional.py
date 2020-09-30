@@ -27,8 +27,7 @@ def tau():
     def transfer(amount: float, to: str):
         assert amount > 0, 'Cannot send negative balances!'
 
-        # TODO - A1 - why is this caller, and not signer?
-        # if we have a contract calling this, although signed by someone else, this will not work
+        # TODO - A4 - why is this caller, and not signer?
         sender = ctx.signer
 
         assert balances[sender] >= amount, 'Not enough coins to send!'
@@ -61,7 +60,7 @@ def tau():
         assert amount > 0, 'Cannot send negative balances!'
         assert balances[from_address] > amount, 'Cannot send amount greater than balance!'
 
-        # TODO - A1 - Trying to understand this currency.py vs. function in general...
+        # TODO - A4 - Trying to understand this currency.py vs. function in general...
         balances[from_address] -= amount
         balances[to_address] += amount
 
@@ -127,30 +126,11 @@ def eth():
         balances[from_address] -= amount
         balances[to_address] += amount
 
-
-
-
-# TODO - Liquidity pools - mint / burn
-# TODO - Reserves (gas savings) vs. Balance
-# TODO - KLast
-# TODO - Fees
-# TODO - Minimum liquidity
-def dex():
-    # Illegal use of a builtin
-    # import time
-    I = importlib
-
-    # Enforceable interface
-    token_interface = [
-        I.Func('transfer', args=('amount', 'to')),
-        I.Func('balance_of', args=('account',))
-    ]
-
-    pair_token_interface = [
-        I.Func('transfer', args=('amount', 'to')),
-        I.Func('balance_of', args=('account',))
-    ]
-
+# TODO - A2 - Implement as Curency Standards
+# In UniV2 this also implements as a an ERC20 currency
+# This "currently works in the world of Tau" but should follow a currency standards
+# Saving some cycles.
+def dex_pairs():
     # BASE PAIR STATE
     # Token
     # token = import_module(token_contract: str)
@@ -169,106 +149,26 @@ def dex():
     # lp_token_balance = _pairs[tau_contract: str, token_contract: str, 'lp_token_balance', address:str]_
     _pairs = Hash()
 
-    # Contract management variables
-    _fee_to = Variable()
-    _fee_to_setter = Variable()
-    _migrator = Varibale()
-
-    # TODO - Verifiy minimum liquidity
-    MINIMUM_LIQUIDITY = 1
-    TOKEN_DECIMALS = 18
-
-    # Get token modules, validate & return
-    def get_token_interface(tau_contract, token_contract):
-        # Make sure that what is imported is actually a valid token
-        tau = I.import_module(tau_contract)
-        assert I.enforce_interface(tau, token_interface), 'Tau contract does not meet the required interface'
-
-        token = I.import_module(token_contract)
-        assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
-
-        return tau, token
-
-    # TODO - Validate safe_transfer works for TAU + Other tokens
+    # TODO - A2 - Validate safe_transfer works for TAU + Other tokens
     # Pair Fn
     def safe_transfer(token, to, amount) :
         results = token.transfer(to, amount)
         assert results and isinstance(results, bool) and results == True, 'Transfer Failed'
 
+    # TODO - A2 - Implement Jeff's "Valid Hex Address"
     # Get zero address
     def zero_address():
-        address = '0x'
-        for i in range(0,TOKEN_DECIMALS) :
-            address += '0'
-        return address
+        return '0'
 
-    # UniswapV2Library.sol => quote
-    # given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    def _quote(a_amount, a_reserve, b_reserve):
-        assert a_amount > 0, 'Insufficient amount!'
-        assert a_reserve > 0 and b_reserve > 0, 'Insufficient liquidity'
-        b_amount = (a_amount * b_reserve) / a_reserve
-
-        return b_amount
-
-    # TODO - Reconciliate ERC vs. TAU functionality
-    # UniswapV2Library.sol => quote
-    # returns sorted token addresses, used to handle return values from pairs sorted in this order
-    # def _sort_tokens(token_a, token_b):
-    #     assert token_a != token_b, 'Identical contracts'
-    #
-    #     token_0, token_1 = None, None
-    #     if token_a.address() < token_b.address() :
-    #         token_0, token1 = token_a, token_b
-    #     else :
-    #         token_0, token_1 = token_b, token_a
-    #
-    #     return token_0, token_1
-
-    # Part of Dex
-    def calculate_trade_details(tau_contract, token_contract, tau_in, token_in):
-        # First we need to get tau + token reserve
-        tau_reserve = _pairs[tau_contract, token_contract, 'tau_reserve']
-        token_reserve = _pairs[tau_contract, token_contract, 'token_reserve']
-
-        lp_total = tau_reserve * token_reserve
-
-        # Calculate new reserve based on what was passed in
-        tau_reserve_new = tau_reserve + tau_in if tau_in > 0 else 0
-        token_reserve_new = token_reserve + token_in if token_in > 0 else 0
-
-        # Calculate remaining reserve
-        tau_reserve_new = lp_total / token_reserve_new if token_in > 0 else tau_reserve_new
-        token_reserve_new = lp_total / tau_reserve_new if tau_in > 0 else token_reserve_new
-
-        # Calculate how much will be removed
-        tau_out = tau_reserve - tau_reserve_new if token_in > 0 else 0
-        token_out = token_reserve - token_reserve_new if tau_in > 0  else 0
-
-        # Finally, calculate the slippage incurred
-        tau_slippage = (tau_reserve / tau_reserve_new) -1 if token_in > 0 else 0
-        token_slippage = (token_reserve / token_reserve_new) -1 if tau_in > 0 else 0
-
-        return tau_out, token_out, tau_slippage, token_slippage
-
-    # From UniV2Pair.sol
-    # TODO - A1 - Move to pair/lp_token obj
+    # TODO - A2 - Move to pair/lp_token obj
+    # TODO - A3 - Calculate price_cumulative_last
+    # From UniV2Pair.sol => update()
     # Updates Internal_Reserve_State + Price_Cumulative_Over_Time,
     def update(tau, token, tau_balance, token_balance, tau_reserve_last, token_reserve_last):
-        # block_ts = time.time()
-        # time_elapsed = block_ts - _pairs[tau.name, token.name, 'block_ts_last']
-
-        # if time_elapsed > 0 and tau_reserve_last != 0 and token_reserve_last != 0 :
-        #     TODO - Calculate price_cumulative_last
-        #     Need time.time() to calculate price_cumulative_last
-        #     _pairs[tau.token_name(), token.token_name(), 'tau_price_cumulative_last'] = int(_pairs[tau.name, token.name, 'token_reserve'] / _pairs[tau.name, token.name, 'tau_reserve']) * time_elapsed
-        #     _pairs[tau.token_name(), token.token_name(), 'token_price_cumulative_last'] = int(_pairs[tau.name, token.name, 'tau_reserve'] / _pairs[tau.name, token.name, 'token_reserve']) * time_elapsed
-
         _pairs[tau.token_name(), token.token_name(), 'tau_reserve'] = tau_balance
         _pairs[tau.token_name(), token.token_name(), 'token_reserve'] = token_balance
-        # _pairs[tau.token_name(), token.token_name(), 'block_ts_last'] = block_ts
 
-    # TODO - A1 - Move to pair/lp_token obj
+    # TODO - A2 - Move to pair/lp_token obj
     # TODO - A2 - VALIDATE IMPLEMENTATION/SECURITY
     # Currency/Pair Fn - Internal Interface
     def mint_lp_tokens(tau, token, to_address:str, value: int) :
@@ -284,7 +184,7 @@ def dex():
         return _pairs[tau.token_name(), token.token_name(), 'lp_token_supply'], _pairs[tau.token_name(), token.token_name(), 'lp_token_balance', to_address]
         #emit Transfer(address_zero(), to, value)
 
-    # TODO - A1 - Move to pair/lp_token obj
+    # TODO - A2 - Move to pair/lp_token obj
     # TODO - A2 - VALIDATE IMPLEMENTATION/SECURITY
     # Currency/Pair Fn - Internal Interface
     # def burn_lp_tokens(tau, token, from_address: str, value: int) :
@@ -300,14 +200,15 @@ def dex():
     #     return _pairs[tau.token_name(), token.token_name(), 'lp_token_supply'], _pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address]
         # emit Transfer(address_zero(), to, value)
 
-    # TODO - A1 - Move to pair/lp_token obj
+    # TODO - A2 - Move to pair/lp_token obj
     # TODO - A2 - VALIDATE IMPLEMENTATION/SECURITY
     # DONE - PORTED + REVIEWED
     # UniswapV2Pai.sol => _mintFee()
-    def mint_fee(tau, token, tau_reserve, token_reserve):
+    def mint_fee(dex, tau, token, tau_reserve, token_reserve):
         lp_token_supply = _pairs[tau.token_name(), token.token_name(), 'lp_token_supply']
 
-        fee_on = _fee_to != zero_address() # make sure we're not burning the fee?
+        fee_to = dex.fee_to()
+        fee_on = fee_to != zero_address() # make sure we're not burning the fee?
         kLast = _pairs[tau.token_name(), token.token_name(), 'kLast'] # "gas savings"
         if(fee_on) :
             if(kLast != 0) :
@@ -318,7 +219,7 @@ def dex():
                     denominator = (rootK * 5) + rootKLast
                     liquidity = numerator / denominator
                     if(liquidity > 0):
-                        mint_lp_tokens(tau, token, _fee_to, liquidity)
+                        mint_lp_tokens(tau, token, fee_to, liquidity)
         elif(kLast != 0) :
             _pairs[tau.token_name(), token.token_name(), 'kLast'] = 0
 
@@ -328,7 +229,8 @@ def dex():
     # DONE -> PORTED + REVIEWED
     # UniswapV2Pair.sol => mint()
     # This low-level function should be called from a contract which performs important safety checks
-    def mint_liquidity(tau, token, to):
+    @export
+    def mint_liquidity(dex, tau, token, to):
         # 1 - State reserves (current state)
         tau_reserve, token_reserve = get_reserves(tau.token_name, token.token_name) # "gas savings"
         # 2 - Token reserves (new state)
@@ -339,7 +241,7 @@ def dex():
         token_amount = token_balance - token_reserve
 
         # We update how to handle fees, before updating liquidity
-        fee_on = mint_fee(tau, token, tau_reserve, token_reserve)
+        fee_on = mint_fee(dex, tau, token, tau_reserve, token_reserve)
         lp_token_supply = _pairs[tau.token_name(), token.token_name(), 'lp_token_supply'] # "gas savings"
         if(lp_token_supply == 0 ) :
             # TODO - Migrator logic
@@ -368,9 +270,10 @@ def dex():
         return liquidity
 
     # Used when liquidity is removed
-    # TODO - Finish Implementation + Validate
+    # TODO - A1 - Finish Implementation + Validate
     # UniswapV2Pai.sol => burn()
     # This low-level function should be called from a contract which performs important safety checks
+    @export
     # def burn_liquidity(tau, token, to_address):
     #     tau_reserve, token_reserve = get_reserves(tau.token_name, token.token_name) # gas savings
     #     tau_balance = tau.balance_of(ctx.this)
@@ -402,6 +305,210 @@ def dex():
     #     #emit Burn(ctx.signer, tau_amount, token_amount, to_address)
     #     return tau_amount, token_amount
 
+    # Part of Dex
+    @export
+    def calculate_trade_details(tau_contract, token_contract, tau_in, token_in):
+        # First we need to get tau + token reserve
+        tau_reserve = _pairs[tau_contract, token_contract, 'tau_reserve']
+        token_reserve = _pairs[tau_contract, token_contract, 'token_reserve']
+
+        lp_total = tau_reserve * token_reserve
+
+        # Calculate new reserve based on what was passed in
+        tau_reserve_new = tau_reserve + tau_in if tau_in > 0 else 0
+        token_reserve_new = token_reserve + token_in if token_in > 0 else 0
+
+        # Calculate remaining reserve
+        tau_reserve_new = lp_total / token_reserve_new if token_in > 0 else tau_reserve_new
+        token_reserve_new = lp_total / tau_reserve_new if tau_in > 0 else token_reserve_new
+
+        # Calculate how much will be removed
+        tau_out = tau_reserve - tau_reserve_new if token_in > 0 else 0
+        token_out = token_reserve - token_reserve_new if tau_in > 0  else 0
+
+        # Finally, calculate the slippage incurred
+        tau_slippage = (tau_reserve / tau_reserve_new) -1 if token_in > 0 else 0
+        token_slippage = (token_reserve / token_reserve_new) -1 if tau_in > 0 else 0
+
+        return tau_out, token_out, tau_slippage, token_slippage
+
+    # TODO - A1 - Swap needs to be implement liquidity/fees
+    # Pair Fn
+    # UniswapV2Pair.sol => swap()
+    # This low-level function should be called from a contract which performs important safety checks
+    # function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
+    def swap(tau, token, tau_out, token_out, to):
+        assert not (tau_out > 0 and token_out > 0), 'Only one Coin Out allowed'
+        assert tau_out > 0 or token_out > 0, 'Insufficient Ouput Amount'
+
+        tau_reserve = _pairs[tau.token_name(), token.token_name(), 'tau_reserve']
+        token_reserve = _pairs[tau.token_name(), token.token_name(), 'token_reserve']
+
+        assert tau_reserve > tau_out and token_reserve > token_out, 'UniswapV2: Inssuficient Liquidity'
+
+        # TODO - B1 - Why is this called BEFORE downstream asserts?
+        # TODO - B1 - How is SOL.safe_transfer() != TAU.transfer_from()
+        if tau_out > 0 :
+            tau.transfer_from(tau_out, ctx.this, to)
+        if token_out > 0 :
+            token.transfer_from(token_out, ctx.this, to)
+
+        # TODO - B1 - Identify this call from UniV2
+        # if (data.length > 0) IUniswapV2Callee(to).uniswapV2Call(msg.sender, amount0Out, amount1Out, data);
+
+        tau_balance = tau.balance_of(ctx.this)
+        token_balance = token.balance_of(ctx.this)
+
+        # TODO - A3 - Update Balance/Curve Adjustment Calculation
+        # tau_in = tau_balance - (tau_reserve - tau_out) if tau_balance > tau_reserve - tau_out else 0
+        # token_in = token_balance - (token_reserve - token_out) if token_balance > token_reserve - token_out else 0
+        #
+        # assert tau_in > 0 or token_in > 0, 'UniswapV2: Insufficient Input Amount'
+        #
+        # ... I'm not sure why balances are being multiplied by 1000, then 3, then by 1000^2
+        # I'm guessing this has something to do with smoothing the balance curve
+        # tau_balance_adjusted = (tau_balance*1000) - (tau_in*3)
+        # token_balance_adjusted = (token_balance*1000) - (token_in*3)
+        #
+        # assert tau_balance_adjusted * token_balance_adjusted >= (tau_reserve * token_reserve) * (1000^2), 'UniswapV2: Exception: K'
+
+        update(tau, token, tau_balance, token_balance, tau_reserve, token_reserve)
+
+        # emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
+
+    @construct
+    def seed(fee_to_setter:str):
+        _pairs['count'] = 0
+        _fee_to_setter = fee_to_setter
+
+    @export
+    # Number of _pairs created
+    def get_length_pairs():
+        return _pairs['count']
+
+    @export
+    # Returns the total reserves from each tau/token
+    def get_reserves(tau_contract:str, token_contract:str):
+        return _pairs[tau_contract, token_contract, 'tau_reserve'], \
+                _pairs[tau_contract, token_contract, 'token_reserve']
+
+
+# TODO - A1 - Liquidity pools - mint / burn
+# TODO - A1 - Reserves (gas savings) vs. Balance
+# TODO - A1 - Minimum liquidity
+# TODO - A2 - KLast
+# TODO - A2 - Fees
+# TODO - A2 - Fee To Functionality
+# TODO - A3 - Migrator Functionality
+# Public interface
+def dex():
+    # Illegal use of a builtin
+    # import time
+    I = importlib
+
+    # Enforceable interface
+    token_interface = [
+        I.Func('transfer', args=('amount', 'to')),
+        I.Func('balance_of', args=('account',))
+    ]
+
+    pair_token_interface = [
+        I.Func('transfer', args=('amount', 'to')),
+        I.Func('balance_of', args=('account',))
+    ]
+
+    # Contract management variables
+    fee_to = Variable()
+    fee_to_setter = Variable()
+
+    # TODO - Verifiy minimum liquidity
+    MINIMUM_LIQUIDITY = 1
+    TOKEN_DECIMALS = 18
+
+    # Get token modules, validate & return
+    def get_token_interface(tau_contract, token_contract):
+        # Make sure that what is imported is actually a valid token
+        tau = I.import_module(tau_contract)
+        assert I.enforce_interface(tau, token_interface), 'Tau contract does not meet the required interface'
+
+        token = I.import_module(token_contract)
+        assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
+
+        return tau, token
+
+    # UniswapV2Library.sol => quote
+    # given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
+    def quote(a_amount, a_reserve, b_reserve):
+        assert a_amount > 0, 'Insufficient amount!'
+        assert a_reserve > 0 and b_reserve > 0, 'Insufficient liquidity'
+        b_amount = (a_amount * b_reserve) / a_reserve
+
+        return b_amount
+
+    @construct
+    def seed(fee_to_setter:str):
+        _pairs['count'] = 0
+        _fee_to_setter = fee_to_setter
+
+    @export
+    # Number of _pairs created
+    def length_pairs():
+        return _pairs['count']
+
+    # TODO - A2 - Verify contract management Fns
+    # Contract management Fns
+    @export
+    def fee_to():
+        return _fee_to
+
+    # TODO - Understand these security measures in currency
+    @export
+    def set_fee_to(fee_to_address: str):
+        assert ctx.caller == fee_to, 'Forbidden'
+        fee_to = fee_to_address
+
+    @export
+    def set_fee_to_setter(fee_to_setter_address: str):
+        assert ctx.caller == fee_to_setter, 'Forbidden'
+        fee_to_setter = fee_to_setter_address
+
+    @export
+    # Pass contracts + tokens_in, get: tokens_out, slippage
+    def get_trade_details(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+        return calculate_trade_details(tau_contract, token_contract, tau_in, token_in)
+
+    # Factory Fn
+    # Create pair before doing anything else
+    @export
+    def create_pair(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+        # Make sure that what is imported is actually a valid token
+        tau, token = get_token_interface(tau_contract, token_contract)
+
+        assert tau_contract != token_contract
+        assert _pairs[tau_contract, token_contract] is None, 'Market already exists!'
+
+        # 1 - Create the pair
+        _pairs[tau_contract, token_contract] = token_contract
+        _pairs['count'] += 1
+
+        # 2 - Adds liquidity if provided
+        if (not tau_in is None and tau_in > 0) and (not token_in is None and token_in > 0) :
+            add_liquidity(tau_contract, token_contract, tau_in, token_in)
+
+    # TODO - Reconciliate ERC vs. TAU functionality
+    # UniswapV2Library.sol => quote
+    # returns sorted token addresses, used to handle return values from pairs sorted in this order
+    # def _sort_tokens(token_a, token_b):
+    #     assert token_a != token_b, 'Identical contracts'
+    #
+    #     token_0, token_1 = None, None
+    #     if token_a.address() < token_b.address() :
+    #         token_0, token1 = token_a, token_b
+    #     else :
+    #         token_0, token_1 = token_b, token_a
+    #
+    #     return token_0, token_1
+
     # TODO - A1 - Swap needs to be implement liquidity/fees
     # Route01 Fn
     # UniswapV2Router01.sol => addLiquidity()
@@ -416,12 +523,12 @@ def dex():
         if( tau_reserve == 0 and token_reserve == 0 ) :
             tau_amount, token_amount = tau_desired, token_desired
         else :
-            token_optimal = _quote(tau_desired, tau_reserve, token_reserve)
+            token_optimal = quote(tau_desired, tau_reserve, token_reserve)
             if(token_optimal <= token_desired) :
                 assert token_optimal >= token_min, 'Insufficient token amount'
                 tau_amount, token_amount = tau_desired, token_optimal
             else :
-                tau_optimal = _quote(token_desired, token_reserve, tau_reserve)
+                tau_optimal = quote(token_desired, token_reserve, tau_reserve)
                 assert tau_optimal <= tau_desired, 'Insufficient desired tau'
                 assert tau_optimal >= tau_min, 'Insufficient tau amount'
                 tau_amount, token_amount = tau_optimal, token_desired
@@ -447,119 +554,6 @@ def dex():
     #     assert token_amount > token_min, 'Insufficient Token amount'
     #
     #     return tau_amount, token_amount
-
-    # TODO - A1 - Swap needs to be implement liquidity/fees
-    # Pair Fn
-    # UniswapV2Pair.sol => swap()
-    # This low-level function should be called from a contract which performs important safety checks
-    # function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-    def swap(tau, token, tau_out, token_out, to):
-        assert not (tau_out > 0 and token_out > 0), 'Only one Coin Out allowed'
-        assert tau_out > 0 or token_out > 0, 'Insufficient Ouput Amount'
-
-        tau_reserve = _pairs[tau.token_name(), token.token_name(), 'tau_reserve']
-        token_reserve = _pairs[tau.token_name(), token.token_name(), 'token_reserve']
-
-        assert tau_reserve > tau_out and token_reserve > token_out, 'UniswapV2: Inssuficient Liquidity'
-
-        # TODO - A2 - Why is this called BEFORE downstream asserts?
-        # TODO - A2 - How is SOL.safe_transfer() != TAU.transfer_from()
-        if tau_out > 0 :
-            tau.transfer_from(tau_out, ctx.this, to)
-        if token_out > 0 :
-            token.transfer_from(token_out, ctx.this, to)
-
-        # TODO - B1 - Identify this call from UniV2
-        # if (data.length > 0) IUniswapV2Callee(to).uniswapV2Call(msg.sender, amount0Out, amount1Out, data);
-
-        tau_balance = tau.balance_of(ctx.this)
-        token_balance = token.balance_of(ctx.this)
-
-        # TODO - A1/A2 - Deconstruct Curve Adjustment Calculation
-        # tau_in = tau_balance - (tau_reserve - tau_out) if tau_balance > tau_reserve - tau_out else 0
-        # token_in = token_balance - (token_reserve - token_out) if token_balance > token_reserve - token_out else 0
-        #
-        # assert tau_in > 0 or token_in > 0, 'UniswapV2: Insufficient Input Amount'
-        #
-        # ... I'm not sure why balances are being multiplied by 1000, then 3, then by 1000^2
-        # I'm guessing this has something to do with smoothing the balance curve
-        # tau_balance_adjusted = (tau_balance*1000) - (tau_in*3)
-        # token_balance_adjusted = (token_balance*1000) - (token_in*3)
-        #
-        # assert tau_balance_adjusted * token_balance_adjusted >= (tau_reserve * token_reserve) * (1000^2), 'UniswapV2: Exception: K'
-
-        # TODO - A1/A2 - Implement update function
-        update(tau, token, tau_balance, token_balance, tau_reserve, token_reserve)
-
-        # TODO - B2 - Event Emitters?
-        # emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
-
-    @construct
-    def seed(fee_to_setter:str):
-        _pairs['count'] = 0
-        _fee_to_setter = fee_to_setter
-
-    @export
-    # Number of _pairs created
-    def get_length__pairs():
-        return _pairs['count']
-
-    # TODO - A2 - Verify contract management Fns
-    # Contract management Fns
-    # @export
-    # def set_fee_to(fee_to_address: str):
-    #     assert ctx.caller == _fee_to_setter, 'Forbidden'
-    #     _fee_to_setter = fee_to_address
-    #
-    # @export
-    # def set_migrator(migrator_address: str):
-    #     assert ctx.caller == _fee_to_setter, 'Forbidden'
-    #     _migrator = migrator_address
-    #
-    # @export
-    # def set_fee_to_setter(fee_to_setter: str):
-    #     assert ctx.caller == _fee_to_setter, 'Forbidden'
-    #     _fee_to_setter = fee_to_setter
-
-    @export
-    # Returns the total reserves from each tau/token
-    def get_reserves(tau_contract:str, token_contract:str):
-        return _pairs[tau_contract, token_contract, 'tau_reserve'], \
-                _pairs[tau_contract, token_contract, 'token_reserve']
-
-    @export
-    # Pass contracts + tokens_in, get: tokens_out, slippage
-    def get_trade_details(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
-        return calculate_trade_details(tau_contract, token_contract, tau_in, token_in)
-
-    # TODO - A2 - Swap needs to handle fees
-    @export
-    # Route01 Fn
-    # Frankenstein calculate_trade_details() + UniswapV2Router1.sol => swap()
-    def token_swap(tau_contract: str, token_contract: str, tau_in: float, token_in: float, to: str):
-        assert tau_in > 0 or token_in > 0, 'Invalid amount!'
-        assert not (tau_in > 0 and token_in > 0), 'Swap only accepts one currecy!'
-
-        assert not _pairs[tau_contract, token_contract] is None, 'Invalid token ID!'
-        assert _pairs[tau_contract, token_contract, 'tau_reserve'] > 0
-        assert _pairs[tau_contract, token_contract, 'token_reserve'] > 0
-
-        tau, token = get_token_interface(tau_contract, token_contract)
-
-        # 1 - Calculate trade outcome
-        tau_out, token_out, tau_slippage, token_slippage = calculate_trade_details(
-            tau_contract,
-            token_contract,
-            tau_in,
-            token_in
-        )
-
-        # 2 - Transfer in tokens
-        if tau_in > 0 : tau.transfer(tau_in, ctx.this)
-        if token_in > 0 : token.transfer(token_in, ctx.this)
-
-        # 3 - Swap/transfer out tokens + Update
-        swap(tau, token, tau_out, token_out, to)
 
     # TODO - A1 - Add liquidity needs to implement add_liquidity + mint_liquidity
     # TODO - A1 - Add liquidity needs to implement remove_liquidity + burn_liquidity
@@ -599,257 +593,102 @@ def dex():
             _pairs[tau.token_name(), token.token_name(), 'token_reserve']
         )
 
-    # Factory Fn
-    # Create pair before doing anything else
+    # TODO - A2 - Swap needs to handle fees
     @export
-    def create_pair(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
-        # Make sure that what is imported is actually a valid token
+    # Route01 Fn
+    # Frankenstein calculate_trade_details() + UniswapV2Router1.sol => swap()
+    def token_swap(tau_contract: str, token_contract: str, tau_in: float, token_in: float, to: str):
+        assert tau_in > 0 or token_in > 0, 'Invalid amount!'
+        assert not (tau_in > 0 and token_in > 0), 'Swap only accepts one currecy!'
+
+        assert not _pairs[tau_contract, token_contract] is None, 'Invalid token ID!'
+        assert _pairs[tau_contract, token_contract, 'tau_reserve'] > 0
+        assert _pairs[tau_contract, token_contract, 'token_reserve'] > 0
+
         tau, token = get_token_interface(tau_contract, token_contract)
 
-        assert tau_contract != token_contract
-        assert _pairs[tau_contract, token_contract] is None, 'Market already exists!'
+        # 1 - Calculate trade outcome
+        tau_out, token_out, tau_slippage, token_slippage = calculate_trade_details(
+            tau_contract,
+            token_contract,
+            tau_in,
+            token_in
+        )
 
-        # 1 - Create the pair
-        _pairs[tau_contract, token_contract] = token_contract
-        _pairs['count'] += 1
+        # 2 - Transfer in tokens
+        if tau_in > 0 : tau.transfer(tau_in, ctx.this)
+        if token_in > 0 : token.transfer(token_in, ctx.this)
 
-        # 2 - Adds liquidity if provided
-        if (not tau_in is None and tau_in > 0) and (not token_in is None and token_in > 0) :
-            add_liquidity(tau_contract, token_contract, tau_in, token_in)
+        # 3 - Swap/transfer out tokens + Update
+        swap(tau, token, tau_out, token_out, to)
 
-class MyTestCase(TestCase):
 
+class PairSpecs(TestCase):
+    # before each test, setup the conditions
     def setUp(self):
         self.client = ContractingClient()
         self.client.flush()
 
-        # Currently mocking Lamdem functionality w/ inline tokens
-        self.client.submit(tau, 'lamden', constructor_args={
-            's_name': 'lamden',
+        # token0
+        self.client.submit(tau, 'tau', constructor_args={
+            's_name': 'tau',
             's_symbol': 'TAU',
             'vk': 'actor1',
             'vk_amount': 15
         })
 
-        self.client.submit(eth, 'ethereum', constructor_args={
-            's_name': 'ethereum',
+        # token1
+        self.client.submit(eth, 'eth', constructor_args={
+            's_name': 'eth',
             's_symbol': 'ETH',
             'vk': 'actor1',
             'vk_amount': 15
         })
 
-        self.client.submit(dex, 'dex')
+        # Testing - Contract Objects
+        self.tau = self.client.get_contract('tau')
+        self.eth = self.client.get_contract('eth')
+        self.dex = self.client.get_contract('dex')
 
+        # Pair
+        self.dex = self.client.get_contract('dex')
+        self.dex.create_pair(
+            tau_contract='tau',
+            token_contract='eth',
+            tau_in=10,
+            token_in=10
+        )
+
+        self.pair_address = 'pair_address'
+        self.wallet_address = 'wallet_address'
 
     def change_signer(self, name):
         self.client.signer = name
 
-        self.lamden = self.client.get_contract('lamden')
-        self.ethereum = self.client.get_contract('ethereum')
+        self.tau = self.client.get_contract('tau')
+        self.eth = self.client.get_contract('eth')
         self.dex = self.client.get_contract('dex')
 
-    # Unit Test designed around
-    # UniV2
-    # X+Y=Z AMMs - https://ethresear.ch/t/improving-front-running-resistance-of-x-y-k-market-makers/1281
-    def test_1_token_interfaces(self):
-        self.change_signer('actor1')
+    def test_mint(self):
+        tau_amount = 1.0
+        eth_amount = 4.0
 
-        # get balances
-        self.assertEqual(self.lamden.token_name(), 'lamden')
-        self.assertEqual(self.lamden.token_symbol(), 'TAU')
-        self.assertEqual(self.lamden.quick_read('balances', 'actor1'), 15)
-        self.assertEqual(self.lamden.balance_of(account='actor1'), 15)
+        self.tau.transfer(self.pair_address, tau_amount)
+        self.eth.transfer(self.pair_address, eth_amount)
 
-        self.assertEqual(self.ethereum.token_name(), 'ethereum')
-        self.assertEqual(self.ethereum.token_symbol(), 'ETH')
-        self.assertEqual(self.ethereum.quick_read('balances', 'actor1'), 15)
-        self.assertEqual(self.ethereum.balance_of(account = 'actor1'), 15)
+        expected_liquidity = 2.0
+        mint_address, tau_minted, token_minted = self.pair.mint(self.wallet_address)
 
-    def test_2_dex_create_pair(self):
-        self.change_signer('actor1')
+        # TODO - Asserts on Emit()
+        assert self.pair.balance(get_address_zero()) == MINIMUM_LIQUIDITY, 'Minimum liquidity initialized'
+        assert self.pair.balance(self.wallet_address) == expected_liquidity - MINIMUM_LIQUIDITY, 'Expected liquidity initialized'
+        assert not mint_address is None and not tau_minted is None and not token_minted is None, 'Pair minted'
 
-        n__pairs_before = self.dex.get_length__pairs()
+        assert self.pair.total_supply == expected_liquidity, 'Invalid Total supply'
+        assert self.pair.balance_of(self.wallet_address) == expected_liquidity - MINIMUM_LIQUIDITY, 'Invalid balance initialized'
+        assert self.tau.balance_of(self.pair_address) == tau_amount, 'Invalid tau balance'
+        assert self.eth.balance_of(self.pair_address) == eth_amount, 'Invalid ethereum balance'
 
-        # Optionally => Pass in tau_in and token_in
-        self.dex.create_pair(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum',
-            tau_in=10,
-            token_in=10
-        )
-
-        # Verify _pairs increased
-        n__pairs_after = self.dex.get_length__pairs()
-        assert n__pairs_after > n__pairs_before
-
-
-        # The dex should now own 10 of each
-        self.assertEqual(self.lamden.balance_of(account='actor1'), 5)
-        self.assertEqual(self.lamden.balance_of(account='dex'), 10)
-
-        self.assertEqual(self.ethereum.balance_of(account='actor1'), 5)
-        self.assertEqual(self.ethereum.balance_of(account='dex'), 10)
-
-        # Verify reserves are in place
-        tau_reserve, token_reserve = self.dex.get_reserves(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum'
-        )
-
-        self.assertEqual(tau_reserve, 10)
-        self.assertEqual(token_reserve, 10)
-
-    def test_3_dex_review_trade(self):
-        self.change_signer('actor1')
-
-        # CREATE MARKET + ADD LIQUIDITY
-        # Create pair (this will be owned by the dex)
-        self.dex.create_pair(
-            tau_contract='lamden',
-            token_contract='ethereum'
-        )
-
-        # Add liquidity
-        self.dex.add_liquidity(
-            tau_contract='lamden',
-            token_contract='ethereum',
-            tau_in=10,
-            token_in=10
-        )
-
-        # TRADE NUMBER 1 - Check trade details
-        # Miner spends one unit of A: (11, 9.090909), gets 0.909091 units of B
-        tau_out, token_out, tau_slippage, token_slippage = self.dex.get_trade_details(
-            tau_contract='lamden',
-            token_contract='ethereum',
-            tau_in=1,
-            token_in=0
-        )
-
-        # Review trade details are correct
-        assert tau_out == 0
-        assert round(token_out, 6) == 0.909091
-        assert round(token_slippage, 2) * 100 == 10.00
-
-    def test_4_dex_swap(self):
-        self.change_signer('actor1')
-
-        # Distribute currencies to other actors
-        self.lamden.transfer(amount = 1, to = 'miner')
-        self.lamden.transfer(amount = 1, to = 'buyer')
-
-        # CREATE MARKET + ADD LIQUIDITY
-        # Create pair (this will be owned by the dex)
-        self.dex.create_pair(
-            tau_contract='lamden',
-            token_contract='ethereum'
-        )
-
-        # Add liquidity
-        self.dex.add_liquidity(
-            tau_contract='lamden',
-            token_contract='ethereum',
-            tau_in = 10,
-            token_in = 10
-        )
-
-        # TRADE NUMBER 1 - MINER
-        # Miner spends one unit of A: (11, 9.090909), gets 0.909091 units of B
-        self.change_signer('miner')
-        self.dex.token_swap(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum',
-            tau_in = 1,
-            token_in = 0,
-            to = 'miner'
-        )
-
-        # Validate Balances + AMM Reserves Post-Swap
-        miner_balance_tau = self.lamden.balance_of(account='miner')
-        self.assertEqual(miner_balance_tau, 0)
-        miner_balance_eth = round(float(str(self.ethereum.balance_of(account='miner'))),6)
-        self.assertEqual(miner_balance_eth, 0.909091)
-
-        dex_balance_tau = self.lamden.balance_of(account='dex')
-        self.assertEqual(dex_balance_tau, 11)
-        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
-        self.assertEqual(dex_balance_eth, 9.090909)
-
-        # Get remaining reserves
-        tau_reserve, token_reserve = self.dex.get_reserves(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum'
-        )
-
-        tau_reserve = round(float(str(tau_reserve)), 2)
-        self.assertEqual(tau_reserve, 11.0)
-        token_reserve = round(float(str(token_reserve)), 6)
-        self.assertEqual(token_reserve, 9.090909)
-
-
-        # TRADE NUMBER 2 - BUYER
-        self.change_signer('buyer')
-
-        self.dex.token_swap(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum',
-            tau_in = 1,
-            token_in = 0,
-            to = 'buyer'
-        )
-
-        # Validate Balances + AMM Reserves Post-Swap
-        buyer_balance_tau = self.lamden.balance_of(account='buyer')
-        self.assertEqual(buyer_balance_tau, 0)
-        buyer_balance_eth = round(float(str(self.ethereum.balance_of(account='buyer'))),6)
-        self.assertEqual(buyer_balance_eth, 0.757576)
-
-        dex_balance_tau = self.lamden.balance_of(account='dex')
-        self.assertEqual(dex_balance_tau, 12)
-        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
-        self.assertEqual(dex_balance_eth, 8.333333)
-
-        # Get remaining reserves
-        tau_reserve, token_reserve = self.dex.get_reserves(
-            tau_contract = 'lamden',
-            token_contract = 'ethereum'
-        )
-
-        tau_reserve = round(float(str(tau_reserve)), 2)
-        self.assertEqual(tau_reserve, 12.0)
-        token_reserve = round(float(str(token_reserve)), 6)
-        self.assertEqual(token_reserve, 8.333333)
-
-
-        # TRADE NUMBER 3 - MINER
-        self.change_signer('miner')
-
-        self.dex.token_swap(
-            tau_contract='lamden',
-            token_contract='ethereum',
-            tau_in=0,
-            token_in=0.757576,
-            to='miner'
-        )
-
-        # Validate Balances + AMM Reserves Post-Swap
-        miner_balance_tau = round(float(str(self.lamden.balance_of(account='miner'))), 2)
-        self.assertEqual(miner_balance_tau, 1.0)
-        miner_balance_eth = round(float(str(self.ethereum.balance_of(account='miner'))), 6)
-        self.assertEqual(miner_balance_eth, 0.151515)
-
-        dex_balance_tau = round(float(str(self.lamden.balance_of(account='dex'))),2)
-        self.assertEqual(dex_balance_tau, 11.0)
-        dex_balance_eth = round(float(str(self.ethereum.balance_of(account='dex'))), 6)
-        self.assertEqual(dex_balance_eth, 9.090909)
-
-        # Get remaining reserves
-        tau_reserve, token_reserve = self.dex.get_reserves(
-            tau_contract='lamden',
-            token_contract='ethereum'
-        )
-
-        tau_reserve = round(float(str(tau_reserve)), 2)
-        self.assertEqual(tau_reserve, 11.0)
-        token_reserve = round(float(str(token_reserve)), 6)
-        self.assertEqual(token_reserve, 9.090909)
+        reserves = self.pair.get_reserves()
+        assert reserves[0] == tau_amount, 'Invalid tau reserves'
+        assert reserves[1] == eth_amount, 'Invalid eth reserves'
