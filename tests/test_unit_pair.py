@@ -263,7 +263,7 @@ def dex_pairs():
     @export
     def initialize(tau_contract:str, token_contract:str):
         assert ctx.caller == owner.get(), 'TauSwa-DexPairs: FORBIDDEN'
-        
+
         pairs[tau_contract, token_contract] = token_contract
         pairs[tau_contract, token_contract, 'tau_reserve'] = 0
         pairs[tau_contract, token_contract, 'token_reserve'] = 0
@@ -473,58 +473,64 @@ def dex():
 
     # Create pair before doing anything else
     @export
-    def create_pair(dex_pairs: str, tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+    def create_pair(dex_pairs: str, tau_contract: str, token_contract: str):
         # Make sure that what is imported is actually a valid token
-        pairs = get_dex_pairs_interface(dex_pairs)
-        # tau, token = get_token_interface(tau_contract, token_contract)
-
         assert tau_contract != token_contract
+
+        pairs = get_dex_pairs_interface(dex_pairs)
         assert pairs.pair(tau_contract, token_contract) is None, 'Market already exists!'
 
         # 1 - Create the pair
+        # TODO - A4 - Make pair lookup, work vice/versa
         pairs.initialize(tau_contract, token_contract)
 
         # 2 - Adds liquidity if provided
         # if (not tau_in is None and tau_in > 0) and (not token_in is None and token_in > 0) :
-        #     add_liquidity(tau_contract, token_contract, tau_in, token_in)
+        #     add_liquidity(
+        #         dex_pairs=dex_pairs,
+        #         tau_contract=tau_contract,
+        #         token_contract=token_contract,
+        #         tau_in=tau_in,
+        #         token_in=token_in)
 
     # # TODO - A1 - Add liquidity needs to implement add_liquidity + mint_liquidity
     # # TODO - A1 - Add liquidity needs to implement remove_liquidity + burn_liquidity
     # # Route01 Fn
     # # Pair must exist before liquidity can be added
-    # @export
-    # def add_liquidity(tau_contract: str, token_contract: str, tau_in: int, token_in: int):
-    #     assert token_in > 0
-    #     assert tau_in > 0
-    #
-    #     # Make sure that what is imported is actually a valid token
-    #     tau, token = get_token_interface(tau_contract, token_contract)
-    #
-    #     assert tau_contract != token_contract
-    #     assert not pairs[tau_contract, token_contract] is None, 'Market does not exist!'
-    #
-    #     # 1 - This contract will own all amounts sent to it
-    #     tau.transfer(tau_in, ctx.this)
-    #     token.transfer(token_in, ctx.this)
-    #
-    #     # Track liquidity provided by signer
-    #     # TODO - If we care about "% pool" This needs to remain updated as market swings along X,Y
-    #     if pairs[tau_contract, token_contract, ctx.signer] is None :
-    #         pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] = tau_in
-    #         pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] = token_in
-    #     else :
-    #         pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] += tau_in
-    #         pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] += token_in
-    #
-    #     # I'm assuming registry of [ctx.this,ctx.investor,amount] is done via LP
-    #     update(
-    #         tau,
-    #         token,
-    #         tau.balance_of(ctx.this),
-    #         token.balance_of(ctx.this),
-    #         pairs[tau.token_name(), token.token_name(), 'tau_reserve'],
-    #         pairs[tau.token_name(), token.token_name(), 'token_reserve']
-    #     )
+    @export
+    def add_liquidity(dex_pairs: str, tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+        assert token_in > 0
+        assert tau_in > 0
+
+        # Make sure that what is imported is actually a valid token
+        tau, token = get_token_interface(tau_contract, token_contract)
+        assert tau_contract != token_contract
+
+        pairs = get_dex_pairs_interface(dex_pairs)
+        assert not pairs.pair(tau_contract, token_contract) is None, 'Market does not exist!'
+
+        # 1 - This contract will own all amounts sent to it
+        tau.transfer(tau_in, ctx.this)
+        token.transfer(token_in, ctx.this)
+
+        # # Track liquidity provided by signer
+        # # TODO - If we care about "% pool" This needs to remain updated as market swings along X,Y
+        # if pairs[tau_contract, token_contract, ctx.signer] is None :
+        #     pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] = tau_in
+        #     pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] = token_in
+        # else :
+        #     pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] += tau_in
+        #     pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] += token_in
+        #
+        # # I'm assuming registry of [ctx.this,ctx.investor,amount] is done via LP
+        # update(
+        #     tau,
+        #     token,
+        #     tau.balance_of(ctx.this),
+        #     token.balance_of(ctx.this),
+        #     pairs[tau.token_name(), token.token_name(), 'tau_reserve'],
+        #     pairs[tau.token_name(), token.token_name(), 'token_reserve']
+        # )
 
 MINIMUM_LIQUIDITY = 1
 class PairSpecs(TestCase):
@@ -554,23 +560,21 @@ class PairSpecs(TestCase):
             'vk_amount': 15
         })
 
-        # Testing - Contract Objects
-        self.tau = self.client.get_contract('tau')
-        self.eth = self.client.get_contract('eth')
-
         # Dex
         self.client.submit(dex, 'dex', constructor_args={
             'fee_to_setter_address': self.fee_to_setter_address
         })
-        self.dex = self.client.get_contract('dex')
 
-        # Pair
+        # Dex Pairs
+        # Initialize ownership to dex
         self.client.submit(dex_pairs, 'dex_pairs', constructor_args={
             'owner_address': 'dex'
         })
-        self.dex_pairs = self.client.get_contract('dex_pairs')
 
-        # Initialize pair
+        # Change tx signer to actor1
+        self.change_signer('actor1')
+
+        # Create pair on Dex
         self.dex.create_pair(
             dex_pairs='dex_pairs',
             tau_contract='tau',
@@ -585,19 +589,20 @@ class PairSpecs(TestCase):
         self.tau = self.client.get_contract('tau')
         self.eth = self.client.get_contract('eth')
         self.dex = self.client.get_contract('dex')
+        self.dex_pairs = self.client.get_contract('dex_pairs')
 
     def zero_address(self):
         return '0'
 
     def test_mint(self):
         self.change_signer('actor1')
-        #
-        # tau_amount = 1.0
-        # eth_amount = 4.0
-        #
-        # self.tau.transfer(self.dex, tau_amount)
-        # self.eth.transfer(self.dex, eth_amount)
-        #
+
+        tau_amount = 1.0
+        eth_amount = 4.0
+
+        self.tau.transfer(amount=tau_amount, to=self.dex.name)
+        self.eth.transfer(amount=eth_amount, to=self.dex.name)
+
         # expected_liquidity = 2.0
         # mint_address, tau_minted, token_minted = self.dex_pairs.mint_liquidity(
         #     self.dex,
@@ -605,7 +610,7 @@ class PairSpecs(TestCase):
         #     self.eth,
         #     self.wallet_address
         # )
-        #
+
         # # TODO - Asserts on Emit()
         # assert self.dex_pairs.balance(self.zero_address()) == MINIMUM_LIQUIDITY, 'Minimum liquidity initialized'
         # assert self.dex_pairs.balance(self.wallet_address) == expected_liquidity - MINIMUM_LIQUIDITY, 'Expected liquidity initialized'
