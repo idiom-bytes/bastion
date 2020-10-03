@@ -803,6 +803,8 @@ class PairSpecs(TestCase):
 
         index = 0
         for test_case in swap_test_cases :
+            self.setUp()
+
             swap_amount, tau_amount, token_amount, expected_output_amount = test_case
 
             index += 1
@@ -813,13 +815,13 @@ class PairSpecs(TestCase):
 
             # TODO - A2 - Complete UniswapV2: K exceptions
             # with self.assertRaises(Exception) as context:
-            #     self.dex_pairs.swap(
-            #         tau_contract=self.tau.name,
-            #         token_contract=self.eth.name,
-            #         tau_out=0,
-            #         token_out=expected_output_amount + 1.0, # swap more
-            #         to_address=self.wallet_address
-            #     )
+            # self.dex_pairs.swap(
+            #     tau_contract=self.tau.name,
+            #     token_contract=self.eth.name,
+            #     tau_out=0,
+            #     token_out=expected_output_amount + 1.0, # swap more
+            #     to_address=self.wallet_address
+            # )
             # self.assertTrue('UniswapV2: K' in context.exception, 'UniswapV2 ')
 
             self.dex_pairs.swap(
@@ -829,6 +831,20 @@ class PairSpecs(TestCase):
                 token_out=expected_output_amount,
                 to_address=self.wallet_address
             )
+
+            # Validate Reserves
+            tau_reserve, token_reserve = self.dex_pairs.get_pair_reserves(
+                tau_contract=self.tau.name,
+                token_contract=self.eth.name
+            )
+
+            self.assertEqual(tau_reserve, tau_amount + swap_amount)
+            self.assertEqual(token_reserve, token_amount - expected_output_amount)
+
+            wallet_balance_tau = self.tau.balance_of(account=self.wallet_address)
+            self.assertEqual(wallet_balance_tau, 0.0)
+            wallet_balance_token = self.eth.balance_of(account=self.wallet_address)
+            self.assertEqual(wallet_balance_token, expected_output_amount)
 
     def test_3_token0_swap(self):
         self.change_signer('actor1')
