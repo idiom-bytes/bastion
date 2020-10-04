@@ -232,36 +232,35 @@ def dex_pairs():
 
     # TODO - A1 - VALIDATE IMPLEMENTATION
     # Currency/Pair Fn - Internal Interface
-    def mint_lp_tokens(tau, token, to_address, value) :
+    def mint_lp_tokens(tau, token, to_address, amount) :
         assert not to_address is None, 'Invalid Address {}'.format(to_address)
         assert isinstance(to_address, str), 'Invalid type {}'.format(to_address)
 
         # Increase LP Token supply
-        pairs[tau.token_name(), token.token_name(), 'lp_token_supply'] += value
+        pairs[tau.token_name(), token.token_name(), 'lp_token_supply'] += amount
 
         # Increase Acct LP Token balance
         lp_token_balance = pairs[tau.token_name(), token.token_name(), 'lp_token_balance', to_address]
-        pairs[tau.token_name(), token.token_name(), 'lp_token_balance', to_address] = lp_token_balance + value if not lp_token_balance is None else value
+        pairs[tau.token_name(), token.token_name(), 'lp_token_balance', to_address] = lp_token_balance + amount if not lp_token_balance is None else amount
 
         # return new supply, and balance
-        #emit Transfer(address_zero(), to, value)
-        return zero_address(), to_address, value
+        #emit Transfer(address_zero(), to, amount)
+        return zero_address(), to_address, amount
 
-    # # TODO - A1 - VALIDATE IMPLEMENTATION/SECURITY
-    # # Currency/Pair Fn - Internal Interface
-    # def burn_lp_tokens(tau, token, from_address, value) :
-    #     # Decrease LP Token supply
-    #     lp_token_supply = pairs[tau.token_name(), token.token_name(), 'lp_token_supply']
-    #     lp_token_supply = lp_token_supply - value
-    #
-    #     # Decrease Acct LP Token balance
-    #     lp_token_balance = pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address]
-    #     lp_token_balance = lp_token_balance - value
-    #
-    #     # return new supply, and balance
-    #     # emit Transfer(address_zero(), to, value)
-    #     return pairs[tau.token_name(), token.token_name(), 'lp_token_supply'], pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address]
-    #
+    # TODO - A1 - VALIDATE IMPLEMENTATION/SECURITY
+    # Currency/Pair Fn - Internal Interface
+    def burn_lp_tokens(tau, token, from_address, amount) :
+        # Decrease LP Token supply
+        pairs[tau.token_name(), token.token_name(), 'lp_token_supply'] -= amount
+
+        # Decrease Acct LP Token balance
+        lp_token_balance = pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address]
+        pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address] = lp_token_balance - amount
+
+        # return new supply, and balance
+        # emit Transfer(address_zero(), to, amount)
+        return pairs[tau.token_name(), token.token_name(), 'lp_token_supply'], pairs[tau.token_name(), token.token_name(), 'lp_token_balance', from_address]
+
     # TODO - A1 - VALIDATE IMPLEMENTATION/SECURITY
     # DONE - PORTED + REVIEWED
     # UniswapV2Pai.sol => _mintFee()
@@ -348,9 +347,23 @@ def dex_pairs():
                 pairs[tau_contract, token_contract, 'token_reserve']
 
     @export
-    def balance(tau_contract:str, token_contract:str, address:str):
+    def balance_of(tau_contract:str, token_contract:str, account:str):
         assert not pairs[tau_contract, token_contract] is None, 'Invalid pair'
-        return pairs[tau_contract, token_contract, 'lp_token_balance', address]
+        return pairs[tau_contract, token_contract, 'lp_token_balance', account]
+
+    @export
+    def transfer(tau_contract:str, token_contract:str, amount:int, to:str):
+        assert not pairs[tau_contract, token_contract] is None, 'Invalid pair'
+        assert amount > 0, 'Cannot send negative balances!'
+
+        sender = ctx.caller
+        assert not pairs[tau_contract, token_contract, 'lp_token_balance', sender] is None, 'Invalid sender'
+        assert pairs[tau_contract, token_contract, 'lp_token_balance', sender] >= amount, 'Not enough coins to send!'
+
+        pairs[tau_contract, token_contract, 'lp_token_balance', sender] -= amount
+
+        to_amount = pairs[tau_contract, token_contract, 'lp_token_balance', to]
+        pairs[tau_contract, token_contract, 'lp_token_balance', to] = amount + to_amount if not to_amount is None else amount
 
     # @export
     # # Pass contracts + tokens_in, get: tokens_out, slippage
@@ -369,20 +382,22 @@ def dex_pairs():
         dex = get_dex_interface(dex_contract)
         assert not dex is None, 'Dex needs to be valid'
 
-        # 1 - State reserves (current state)
+        # 1 - Last pair reserves
         tau_reserve, token_reserve = get_pair_reserves(tau_contract=tau_contract,token_contract=token_contract) # "gas savings"
 
-        # 2 - Last total balances (old)
+        # 2 - Last total balances
         last_total_tau_balance = pairs[tau_contract, 'balance']
         last_total_token_balance = pairs[token_contract, 'balance']
 
-        # new total balances (new)
+        # New total balances - token.balance()
         new_total_tau_balance = tau.balance_of(ctx.this)
         new_total_token_balance = token.balance_of(ctx.this)
 
-        # amounts added
+        # Amount delta
         tau_amount = new_total_tau_balance - last_total_tau_balance
         token_amount = new_total_token_balance - last_total_token_balance
+
+        assert tau_amount > 0 and token_amount > 0, 'Invalid token amount'
 
         # TODO - fee_on
         liquidity = None
@@ -423,40 +438,61 @@ def dex_pairs():
         return to_address, tau_amount, token_amount
 
 
-    # # TODO - A1 - Finish Implementation + Validate
-    # # UniswapV2Pai.sol => burn()
-    # # This low-level function should be called from a contract which performs important safety checks
-    # @export
-    # def burn_liquidity(dex, tau, token, to_address):
-    #     tau_reserve, token_reserve = get_pair_reserves(tau.token_name, token.token_name) # gas savings
-    #     tau_balance = tau.balance_of(ctx.this)
-    #     token_balance = token.balance_of(ctx.this)
-    #     lp_token_liquidity = pairs[tau.tau.token_name(), token.token_name(), 'lp_token_balance', ctx.this]
-    #
-    #     # We update how to handle fees, before updating liquidity
-    #     fee_on = mint_fee(dex, tau, token, tau_reserve, token_reserve)
-    #     lp_token_supply = pairs[tau.token_name(), token.token_name(), 'lp_token_supply']
-    #     tau_amount = (lp_token_liquidity * tau_balance) / lp_token_supply # using balances ensures pro-rata distribution
-    #     token_amount = (lp_token_liquidity * token_balance) / lp_token_supply # using balances ensures pro-rata distribution
-    #     assert tau_amount > 0 and token_amount > 0, 'Insufficient liquidity burned'
-    #
-    #     # destroy lp tokens + return tokens
-    #     burn_lp_tokens(tau, token, ctx.this, lp_token_liquidity)
-    #     tau.transfer(tau_amount, to_address) # safe_transfer
-    #     token.transfer(token, token_amount, to_address) # safe_transfer
-    #
-    #     # Get new Dex balance
-    #     tau_balance = tau.balance_of(ctx.this)
-    #     token_balance = token.balance_of(ctx.this)
-    #
-    #     # Update Pair internal state
-    #     update(tau, token, tau_balance, token_balance, tau_reserve, token_reserve)
-    #     if(fee_on):
-    #         # Update kLast to calculate fees
-    #         pairs[tau.tau.token_name(), token.token_name(), 'kLast'] = tau_reserve * token_reserve
-    #
-    #     #emit Burn(ctx.signer, tau_amount, token_amount, to_address)
-    #     return tau_amount, token_amount
+    # TODO - A1 - Finish Implementation + Validate
+    # UniswapV2Pai.sol => burn()
+    # This low-level function should be called from a contract which performs important safety checks
+    @export
+    def burn_liquidity(dex_contract: str, tau_contract: str, token_contract: str, to_address: str):
+        # Make sure that what is imported is actually a valid token
+        tau, token = get_token_interface(tau_contract, token_contract)
+        assert tau_contract != token_contract
+
+        dex = get_dex_interface(dex_contract)
+        assert not dex is None, 'Dex needs to be valid'
+
+        tau_reserve, token_reserve = get_pair_reserves(tau_contract=tau_contract,token_contract=token_contract) # "gas savings"
+
+        # 2 - Get Pair's balance
+        last_total_tau_balance = pairs[tau_contract, 'balance']
+        last_total_token_balance = pairs[token_contract, 'balance']
+
+        # new total balances (new)
+        current_total_tau_balance = tau.balance_of(ctx.this)
+        current_total_token_balance = token.balance_of(ctx.this)
+
+        pair_tau_balance = tau_reserve + (current_total_tau_balance - last_total_tau_balance)
+        pair_token_balance = token_reserve + (current_total_token_balance - last_total_token_balance)
+
+        lp_token_liquidity = balance_of(tau.token_name(), token.token_name(), ctx.this)
+
+        # We update how to handle fees, before updating liquidity
+        fee_on = mint_fee(dex, tau, token, tau_reserve, token_reserve)
+        lp_token_supply = pairs[tau.token_name(), token.token_name(), 'lp_token_supply']
+
+        tau_amount = (lp_token_liquidity * pair_tau_balance) / lp_token_supply # using balances ensures pro-rata distribution
+        token_amount = (lp_token_liquidity * pair_token_balance) / lp_token_supply # using balances ensures pro-rata distribution
+        assert tau_amount > 0 and token_amount > 0, 'Insufficient liquidity burned'
+
+        # destroy lp tokens + return tokens
+        burn_lp_tokens(tau, token, ctx.this, lp_token_liquidity)
+        tau.transfer(tau_amount, to_address) # safe_transfer
+        token.transfer(token_amount, to_address) # safe_transfer
+
+        # Get new Dex balance
+        current_total_tau_balance = tau.balance_of(ctx.this)
+        current_total_token_balance = token.balance_of(ctx.this)
+
+        pair_tau_balance = tau_reserve + (current_total_tau_balance - last_total_tau_balance)
+        pair_token_balance = token_reserve + (current_total_token_balance - last_total_token_balance)
+
+        # Update Pair internal state
+        update(tau, token, pair_tau_balance, pair_token_balance)
+        if(fee_on):
+            # Update kLast to calculate fees
+            pairs[tau.token_name(), token.token_name(), 'kLast'] = pair_tau_balance * pair_token_balance
+
+        #emit Burn(ctx.signer, tau_amount, token_amount, to_address)
+        return tau_amount, token_amount
 
     # TODO - B1/A5 - CallData / Emit Events
     # UniswapV2Pair.sol => swap()
@@ -470,11 +506,11 @@ def dex_pairs():
         tau, token = get_token_interface(tau_contract, token_contract)
         assert tau_contract != token_contract
 
-        pair_tau_reserve, pair_token_reserve = get_pair_reserves(
+        tau_reserve, token_reserve = get_pair_reserves(
             tau_contract=tau_contract,
             token_contract=token_contract
         )
-        assert pair_tau_reserve > tau_out and pair_token_reserve > token_out, 'UniswapV2: Insuficient Liquidity and Reserves'
+        assert tau_reserve > tau_out and token_reserve > token_out, 'UniswapV2: Insuficient Liquidity and Reserves'
 
         # optimistic transfer...
         if tau_out > 0 :
@@ -489,15 +525,15 @@ def dex_pairs():
         current_total_tau_balance = tau.balance_of(ctx.this)
         current_total_token_balance = token.balance_of(ctx.this)
 
-        new_pair_tau_balance = pair_tau_reserve + (current_total_tau_balance - last_total_tau_balance)
-        new_pair_token_balance = pair_token_reserve + (current_total_token_balance - last_total_token_balance)
+        new_pair_tau_balance = tau_reserve + (current_total_tau_balance - last_total_tau_balance)
+        new_pair_token_balance = token_reserve + (current_total_token_balance - last_total_token_balance)
 
         # TODO - B1 - Identify this call from UniV2
         # if (data.length > 0) IUniswapV2Callee(to).uniswapV2Call(msg.sender, amount0Out, amount1Out, data);
 
         # Calculate pair tau_in or token_in based on last/new balances
-        tau_in = new_pair_tau_balance - (pair_tau_reserve - tau_out) if new_pair_tau_balance > pair_tau_reserve else 0
-        token_in = new_pair_token_balance - (pair_token_reserve - token_out) if new_pair_token_balance > pair_token_reserve else 0
+        tau_in = new_pair_tau_balance - (tau_reserve - tau_out) if new_pair_tau_balance > tau_reserve else 0
+        token_in = new_pair_token_balance - (token_reserve - token_out) if new_pair_token_balance > token_reserve else 0
         assert tau_in > 0 or token_in > 0, 'UniswapV2: Insufficient Input Amount tau_in: {} token_in: {}'.format(tau_in, token_in)
 
         # # TODO - A1/A2 - Break down / understand Balance Adjusted K exception
@@ -655,6 +691,7 @@ def dex():
 
 MINIMUM_LIQUIDITY = pow(10,3)
 TOKEN_DECIMALS = 18
+STARTING_BALANCE = 10000
 
 class PairSpecs(TestCase):
 
@@ -676,7 +713,7 @@ class PairSpecs(TestCase):
         self.client.submit(tau, 'tau', constructor_args={
             's_name': 'tau',
             's_symbol': 'TAU',
-            'vk': 'actor1',
+            'vk': self.wallet_address,
             'vk_amount': 10000
         })
 
@@ -684,7 +721,7 @@ class PairSpecs(TestCase):
         self.client.submit(eth, 'eth', constructor_args={
             's_name': 'eth',
             's_symbol': 'ETH',
-            'vk': 'actor1',
+            'vk': self.wallet_address,
             'vk_amount': 10000
         })
 
@@ -701,7 +738,7 @@ class PairSpecs(TestCase):
         })
 
         # Change tx signer to actor1
-        self.change_signer('actor1')
+        self.change_signer(self.wallet_address)
 
         # Create pair on Dex
         self.dex.create_pair(
@@ -722,7 +759,7 @@ class PairSpecs(TestCase):
         return '0'
 
     def test_1_mint(self):
-        self.change_signer('actor1')
+        self.change_signer(self.wallet_address)
 
         tau_amount = 1.0
         eth_amount = 4.0
@@ -742,17 +779,17 @@ class PairSpecs(TestCase):
         total_supply = self.dex_pairs.total_supply(tau_contract=self.tau.name, token_contract=self.eth.name)
         assert total_supply == expected_liquidity, 'Invalid Total supply'
 
-        zero_address_balance = self.dex_pairs.balance(
+        zero_address_balance = self.dex_pairs.balance_of(
             tau_contract=self.tau.name,
             token_contract=self.eth.name,
-            address=self.zero_address()
+            account=self.zero_address()
         )
         assert zero_address_balance == self.expand_to_token_decimals(MINIMUM_LIQUIDITY), 'Invalid minimum liquidity initialized'
 
-        wallet_address_balance = self.dex_pairs.balance(
+        wallet_address_balance = self.dex_pairs.balance_of(
             tau_contract=self.tau.name,
             token_contract=self.eth.name,
-            address=self.wallet_address
+            account=self.wallet_address
         )
         assert wallet_address_balance == expected_liquidity - self.expand_to_token_decimals(MINIMUM_LIQUIDITY), 'Invalid balance initialized'
 
@@ -829,7 +866,7 @@ class PairSpecs(TestCase):
                 token_contract=self.eth.name,
                 tau_out=0,
                 token_out=expected_output_amount,
-                to_address=self.wallet_address
+                to_address='test_results_wallet'
             )
 
             # Validate Reserves
@@ -841,13 +878,13 @@ class PairSpecs(TestCase):
             self.assertEqual(tau_reserve, tau_amount + swap_amount)
             self.assertEqual(token_reserve, token_amount - expected_output_amount)
 
-            wallet_balance_tau = self.tau.balance_of(account=self.wallet_address)
-            self.assertEqual(wallet_balance_tau, 0.0)
-            wallet_balance_token = self.eth.balance_of(account=self.wallet_address)
+            wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
+            self.assertEqual(wallet_balance_tau, 0)
+            wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
             self.assertEqual(wallet_balance_token, expected_output_amount)
 
     def test_3_token0_swap(self):
-        self.change_signer('actor1')
+        self.change_signer(self.wallet_address)
 
         tau_amount = 5
         token_amount = 10
@@ -865,7 +902,7 @@ class PairSpecs(TestCase):
             token_contract=self.eth.name,
             tau_out=0,
             token_out=expected_output_amount,
-            to_address=self.wallet_address
+            to_address='test_results_wallet'
         )
 
         # Validate Reserves
@@ -891,7 +928,62 @@ class PairSpecs(TestCase):
 
         # Validate Wallet Balances Post Swap
         # TODO A4 - Original test verifies against mint/total_supply of coins
-        wallet_balance_tau = self.tau.balance_of(account=self.wallet_address)
+        wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
         self.assertEqual(wallet_balance_tau, 0.0)
-        wallet_balance_token = self.eth.balance_of(account=self.wallet_address)
+        wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
         self.assertEqual(wallet_balance_token, expected_output_amount)
+
+    def test_4_burn(self):
+        self.change_signer(self.wallet_address)
+
+        tau_amount = 3
+        token_amount = 3
+
+        # Add liquidity
+        self.add_liquidity(tau_amount, token_amount)
+
+        expected_liquidity = 3
+
+        # This is the secret right here... it's not that we're transferring TAU
+        # We need to trasnfer Liquidity to the dex_pair balance...
+        # await pair.transfer(pair.address, expectedLiquidity.sub(MINIMUM_LIQUIDITY))
+        self.dex_pairs.transfer(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            amount=expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY),
+            to=self.dex_pairs.name
+        )
+
+        dex_pair_lp_balance = self.dex_pairs.balance_of(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            account=self.dex_pairs.name
+        )
+        assert dex_pair_lp_balance == expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        # transfer, transfer, transfer, sync, burn
+        tau_amount, token_amount = self.dex_pairs.burn_liquidity(
+            dex_contract=self.dex.name,
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            to_address=self.wallet_address
+        )
+
+        # Assert we got back everything - MINIMUM LIQUIDITY
+        assert tau_amount == token_amount
+        assert tau_amount == expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+        assert token_amount == expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        tau_wallet_balance = self.tau.balance_of(account=self.wallet_address)
+        assert tau_wallet_balance == STARTING_BALANCE - self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+        token_wallet_balance = self.eth.balance_of(account=self.wallet_address)
+        assert token_wallet_balance == STARTING_BALANCE - self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        # Assert that remaining balance of liquidity for wallet is 0
+        assert self.dex_pairs.balance_of(tau_contract=self.tau.name, token_contract=self.eth.name, account=self.wallet_address) == 0
+        # assert total supply left for token pair is the MINIMUM_LIQUIDITY
+        assert self.dex_pairs.total_supply(tau_contract=self.tau.name, token_contract=self.eth.name) == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        # assert total currency left on currencies is only the minimum liquidity
+        assert self.tau.balance_of(account=self.dex_pairs.name) == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+        assert self.eth.balance_of(account=self.dex_pairs.name) == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
