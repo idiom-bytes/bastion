@@ -583,6 +583,9 @@ def dex():
     fee_to = Variable()
     fee_to_setter = Variable()
 
+    def zero_address():
+        return '0'
+
     def get_dex_pairs_interface(dex_pairs_contract):
         dex_pairs = I.import_module(dex_pairs_contract)
         # assert I.enforce_interface(dex_pairs, dex_pairs_interface), 'Dex pairs contract does not meet the required interface'
@@ -610,8 +613,8 @@ def dex():
         return b_amount
 
     @construct
-    def seed(fee_to_address:str, fee_to_setter_address:str):
-        fee_to.set(fee_to_address)
+    def seed(fee_to_setter_address:str):
+        fee_to.set(zero_address())
         fee_to_setter.set(fee_to_setter_address)
 
     @export
@@ -622,6 +625,11 @@ def dex():
     @export
     def fee_to():
         return fee_to.get()
+
+    @export
+    def set_fee_to(account:str):
+        assert ctx.caller == fee_to_setter.get()
+        fee_to.set(account)
 
     @export
     def fee_to_setter():
@@ -693,6 +701,10 @@ MINIMUM_LIQUIDITY = pow(10,3)
 TOKEN_DECIMALS = 18
 STARTING_BALANCE = 10000
 
+# All test values for tests, taken from UniswapV2Pair.specs.ts
+# Tests do not validate against functionality that was never tested, such as:
+# TODO - A2 - Complete UniswapV2: K exceptions
+# TODO - A4 - Token Supply Validations.
 class PairSpecs(TestCase):
 
     # returns ContractingDecimal
@@ -708,7 +720,7 @@ class PairSpecs(TestCase):
         self.fee_to_setter_address = 'fee_to_setter_address'
         self.wallet_address = 'wallet_address'
 
-        # TODO - A2 - Complete UniswapV2: K exceptions. Increased balances from 15 => 10,000
+        # TODO - A2 - Complete UniswapV2: K exceptions.
         # token0
         self.client.submit(tau, 'tau', constructor_args={
             's_name': 'tau',
@@ -727,7 +739,6 @@ class PairSpecs(TestCase):
 
         # Dex
         self.client.submit(dex, 'dex', constructor_args={
-            'fee_to_address': self.fee_to_address,
             'fee_to_setter_address': self.fee_to_setter_address
         })
 
@@ -879,8 +890,8 @@ class PairSpecs(TestCase):
             self.assertEqual(token_reserve, token_amount - expected_output_amount)
 
             wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
-            self.assertEqual(wallet_balance_tau, 0)
             wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
+            self.assertEqual(wallet_balance_tau, 0)
             self.assertEqual(wallet_balance_token, expected_output_amount)
 
     def test_3_token0_swap(self):
@@ -904,6 +915,11 @@ class PairSpecs(TestCase):
             token_out=expected_output_amount,
             to_address='test_results_wallet'
         )
+        # Validate Wallet Balances Post Swap
+        wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
+        self.assertEqual(wallet_balance_tau, 0.0)
+        wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
+        self.assertEqual(wallet_balance_token, expected_output_amount)
 
         # Validate Reserves
         tau_reserve, token_reserve = self.dex_pairs.get_pair_reserves(
@@ -920,18 +936,62 @@ class PairSpecs(TestCase):
         pair_balance_token = self.eth.balance_of(account=self.dex_pairs.name)
         self.assertEqual(pair_balance_token, token_amount - expected_output_amount)
 
-        # Validate Supply
+        # TODO - A4 - Token Supply Validations.
+        # Validate Supply @ UniswapV2Pair.specs.ts
         total_supply = self.dex_pairs.total_supply(
             tau_contract=self.tau.name,
             token_contract=self.eth.name
         )
 
+    def test_3_token1_swap(self):
+        self.change_signer(self.wallet_address)
+
+        tau_amount = 5
+        token_amount = 10
+
+        self.add_liquidity(tau_amount, token_amount)
+
+        swap_amount = 1
+        expected_output_amount = self.expand_to_token_decimals(453305446940074565)
+
+        self.eth.transfer(amount=swap_amount, to=self.dex_pairs.name)
+
+        # TODO - A4 - Asserts on Emit()
+        self.dex_pairs.swap(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            tau_out=expected_output_amount,
+            token_out=0,
+            to_address='test_results_wallet'
+        )
+
         # Validate Wallet Balances Post Swap
-        # TODO A4 - Original test verifies against mint/total_supply of coins
         wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
-        self.assertEqual(wallet_balance_tau, 0.0)
+        self.assertEqual(wallet_balance_tau, expected_output_amount)
         wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
-        self.assertEqual(wallet_balance_token, expected_output_amount)
+        self.assertEqual(wallet_balance_token, 0.0)
+
+        # Validate Reserves
+        tau_reserve, token_reserve = self.dex_pairs.get_pair_reserves(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name
+        )
+
+        self.assertEqual(tau_reserve, tau_amount - expected_output_amount)
+        self.assertEqual(token_reserve, token_amount + swap_amount)
+
+        # Validate Balances + AMM Reserves Post-Swap
+        pair_balance_tau = self.tau.balance_of(account=self.dex_pairs.name)
+        self.assertEqual(pair_balance_tau, tau_amount - expected_output_amount)
+        pair_balance_token = self.eth.balance_of(account=self.dex_pairs.name)
+        self.assertEqual(pair_balance_token, token_amount + swap_amount)
+
+        # TODO - A4 - Token Supply Validations.
+        # Validate Supply @ UniswapV2Pair.specs.ts
+        total_supply = self.dex_pairs.total_supply(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name
+        )
 
     def test_4_burn(self):
         self.change_signer(self.wallet_address)
@@ -944,9 +1004,6 @@ class PairSpecs(TestCase):
 
         expected_liquidity = 3
 
-        # This is the secret right here... it's not that we're transferring TAU
-        # We need to trasnfer Liquidity to the dex_pair balance...
-        # await pair.transfer(pair.address, expectedLiquidity.sub(MINIMUM_LIQUIDITY))
         self.dex_pairs.transfer(
             tau_contract=self.tau.name,
             token_contract=self.eth.name,
@@ -987,3 +1044,142 @@ class PairSpecs(TestCase):
         # assert total currency left on currencies is only the minimum liquidity
         assert self.tau.balance_of(account=self.dex_pairs.name) == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
         assert self.eth.balance_of(account=self.dex_pairs.name) == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+    # Test = Dex.fee_to is not initialized (feeTo is Off)
+    def test_5_feeTo_off(self):
+        tau_amount = 1000
+        eth_amount = 1000
+        self.add_liquidity(tau_amount, eth_amount)
+
+        swap_amount = 1
+        expected_output_amount = self.expand_to_token_decimals(996006981039903216)
+        self.eth.transfer(amount=swap_amount, to=self.dex_pairs.name)
+        self.dex_pairs.swap(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            tau_out=expected_output_amount,
+            token_out=0,
+            to_address='test_results_wallet'
+        )
+
+        # Validate Reserves
+        tau_reserve, token_reserve = self.dex_pairs.get_pair_reserves(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name
+        )
+        self.assertEqual(tau_reserve, tau_amount - expected_output_amount)
+        self.assertEqual(token_reserve, eth_amount + swap_amount)
+
+        wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
+        wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
+        self.assertEqual(wallet_balance_tau, expected_output_amount)
+        self.assertEqual(wallet_balance_token, 0)
+
+        expected_liquidity = 1000
+
+        self.dex_pairs.transfer(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            amount=expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY),
+            to=self.dex_pairs.name
+        )
+
+        dex_pair_lp_balance = self.dex_pairs.balance_of(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            account=self.dex_pairs.name
+        )
+        assert dex_pair_lp_balance == expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        self.dex_pairs.burn_liquidity(
+            dex_contract=self.dex.name,
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            to_address=self.wallet_address
+        )
+
+        # Total supply remains as MINIMUM LIQUIDITY
+        pair_total_supply = self.dex_pairs.total_supply(tau_contract=self.tau.name, token_contract=self.eth.name)
+        assert pair_total_supply == self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+    # Test = Dex.fee_to gets initialized (feeTo is On)
+    def test_5_feeTo_on(self):
+        # Initialize dex.fee_to
+        self.change_signer(self.fee_to_setter_address)
+        self.dex.set_fee_to(account=self.fee_to_address)
+
+        self.change_signer(self.wallet_address)
+
+        tau_amount = 1000
+        eth_amount = 1000
+        self.add_liquidity(tau_amount, eth_amount)
+
+        swap_amount = 1
+        expected_output_amount = self.expand_to_token_decimals(996006981039903216)
+        self.eth.transfer(amount=swap_amount, to=self.dex_pairs.name)
+        self.dex_pairs.swap(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            tau_out=expected_output_amount,
+            token_out=0,
+            to_address='test_results_wallet'
+        )
+
+        # Validate Reserves
+        tau_reserve, token_reserve = self.dex_pairs.get_pair_reserves(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name
+        )
+        self.assertEqual(tau_reserve, tau_amount - expected_output_amount)
+        self.assertEqual(token_reserve, eth_amount + swap_amount)
+
+        wallet_balance_tau = self.tau.balance_of(account='test_results_wallet')
+        wallet_balance_token = self.eth.balance_of(account='test_results_wallet')
+        self.assertEqual(wallet_balance_tau, expected_output_amount)
+        self.assertEqual(wallet_balance_token, 0)
+
+        expected_liquidity = 1000
+
+        self.dex_pairs.transfer(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            amount=expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY),
+            to=self.dex_pairs.name
+        )
+
+        dex_pair_lp_balance = self.dex_pairs.balance_of(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            account=self.dex_pairs.name
+        )
+        assert dex_pair_lp_balance == expected_liquidity-self.expand_to_token_decimals(MINIMUM_LIQUIDITY)
+
+        self.dex_pairs.burn_liquidity(
+            dex_contract=self.dex.name,
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            to_address=self.wallet_address
+        )
+
+        # Total supply remains as MINIMUM LIQUIDITY
+        # ContractingDecimal carries more precision than Ethereum bigNumber
+        # assert to 17 places
+        expected_supply = self.expand_to_token_decimals(249750499251388 + MINIMUM_LIQUIDITY)
+        pair_total_supply = self.dex_pairs.total_supply(tau_contract=self.tau.name, token_contract=self.eth.name)
+        self.assertAlmostEqual(pair_total_supply, expected_supply, places=17)
+
+        fee_to_balance = self.dex_pairs.balance_of(
+            tau_contract=self.tau.name,
+            token_contract=self.eth.name,
+            account=self.fee_to_address
+        )
+        expected_fee_to_balance = self.expand_to_token_decimals(249750499251388)
+        self.assertAlmostEqual(fee_to_balance, expected_fee_to_balance, places=17)
+
+        tau_balance = self.tau.balance_of(account=self.dex_pairs.name)
+        expected_tau_balance = self.expand_to_token_decimals(249501683697445 + MINIMUM_LIQUIDITY)
+        self.assertAlmostEqual(tau_balance, expected_tau_balance, places=17)
+
+        token_balance = self.eth.balance_of(account=self.dex_pairs.name)
+        expected_token_balance = self.expand_to_token_decimals(250000187312969 + MINIMUM_LIQUIDITY)
+        self.assertAlmostEqual(token_balance, expected_token_balance, places=17)
