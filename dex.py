@@ -1,177 +1,143 @@
-import time
+# DONE - Requesting Audit - A1 - Liquidity pools - mint / burn
+# DONE - Requesting Audit - A2 - KLast
+# DONE - Requesting Audit - A2 - Fee functionality
+# TODO - A3 - Migrator Functionality
 
-def dex() :
-    I = importlib
+# Public interface
+# Illegal use of a builtin
+# import time
+# TODO - A4 - Price oracle
+I = importlib
 
-    # Enforceable interface
-    token_interface = [
-        I.Func('transfer', args=('amount', 'to')),
-        I.Func('balance_of', args=('account')),
-        I.Func('allowance', args=('owner', 'spender')),
-        I.Func('approve', args=('amount', 'to')),
-        I.Func('transfer_from', args=('amount', 'to', 'main_account')),
-    ]
+# Enforceable interface
+token_interface = [
+    I.Func('transfer', args=('amount', 'to')),
+    I.Func('balance_of', args=('account',))
+]
 
-    Pairs = Hash()
+pair_token_interface = [
+    I.Func('transfer', args=('amount', 'to')),
+    I.Func('balance_of', args=('account',))
+]
 
-    def get_reserves(tau_name, token_name):
-        return Pairs[tau_name, token_name, 'tau_reserve'], \
-               Pairs[tau_name, token_name, 'token_reserve'], \
-               Pairs[tau_name, token_name, 'block_ts_last']
+dex_pairs_interface = [
+    I.Func('get_length_pairs', args=())
+]
 
-    def get_price(tau, token, buy_side = False):
-        if buy_side:
-            return Pairs[tau.name, token.name, 'tau_reserve'] / token.balance_of(ctx.this)
-        else:
-            return token.balance_of(ctx.this) / Pairs[tau.name, token.name, 'tau_reserve']
+# Contract management variables
+fee_to = Variable()
+fee_to_setter = Variable()
 
-    # Get token modules, validate & return
-    def get_token_interface(tau_contract, token_contract):
-        assert Pairs[tau_contract, token_contract] is not None, 'Invalid token ID!'
+def zero_address():
+    return '0'
 
-        # Make sure that what is imported is actually a valid token
-        tau = I.import_module(tau_contract)
-        assert I.enforce_interface(tau, token_interface), 'Token contract does not meet the required interface'
+def get_dex_pairs_interface(dex_pairs_contract):
+    dex_pairs = I.import_module(dex_pairs_contract)
+    # assert I.enforce_interface(dex_pairs, dex_pairs_interface), 'Dex pairs contract does not meet the required interface'
 
-        token = I.import_module(token_contract)
-        assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
+    return dex_pairs
 
-        return tau, token
+# Get token modules, validate & return
+def get_token_interface(tau_contract, token_contract):
+    # Make sure that what is imported is actually a valid token
+    tau = I.import_module(tau_contract)
+    assert I.enforce_interface(tau, token_interface), 'Tau contract does not meet the required interface'
 
-    # Only one token, and
-    # Returns slippage, rates, etc..
-    # X*Y=Z
-    def get_trade_details(tau, token, tau_out, token_out):
-        # Let's calculate slippage
-        # And how much you get out from the trade
-        tau_reserve = Pairs[tau_contract, token_contract, 'tau_reserve']
-        token_reserve = Pairs[tau_contract, token_contract, 'token_reserve']
+    token = I.import_module(token_contract)
+    assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
 
-        lp_total = tau_reserve * token_reserve
+    return tau, token
 
-        # Calculate new reserve based on what was passed in
-        tau_reserve_new = tau_reserve + tau_in if tau_in > 0 else 0
-        token_reserve_new = token_reserve + token_in if token_in > 0 else 0
+# UniswapV2Library.sol => quote
+# given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
+def quote(a_amount, a_reserve, b_reserve):
+    assert a_amount > 0, 'Insufficient amount!'
+    assert a_reserve > 0 and b_reserve > 0, 'Insufficient liquidity'
+    b_amount = (a_amount * b_reserve) / a_reserve
 
-        # Calculate remaining reserve
-        tau_reserve_new = lp_total / token_reserve_new if token_in > 0 else tau_reserve_new
-        token_reserve_new = lp_total / tau_reserve_new if tau_in > 0 else token_reserve_new
+    return b_amount
 
-        # Calculate how much will be removed
-        tau_out = tau_reserve - tau_reserve_new if token_in > 0 else 0
-        token_out = token_reserve - token_reserve_new if tau_in > 0  else 0
+@construct
+def seed(fee_to_setter_address:str):
+    fee_to.set(zero_address())
+    fee_to_setter.set(fee_to_setter_address)
 
-        # Finally, calculate the slippage incurred
-        tau_slippage = tau_reserve / tau_reserve_new if token_in > 0 else 0
-        token_slippage = token_reserve / token_reserve_new  if tau_in > 0 else 0
+@export
+# Number of pairs created
+def length_pairs():
+    return pairs['count']
 
-        return tau_out, token_out, tau_slippage, token_slippage
+@export
+def fee_to():
+    return fee_to.get()
 
-    # From UniV2Pair.sol
-    def update(tau, token, tau_balance, token_balance, tau_reserve_last, token_reserve_last):
-        block_ts = time.time()
-        time_elapsed = block_ts - Pairs[tau.name, token.name, 'block_ts_last']
+@export
+def set_fee_to(account:str):
+    assert ctx.caller == fee_to_setter.get()
+    fee_to.set(account)
 
-        if time_elapsed > 0 and tau_reserve_last != 0 and token_reserve_last != 0 :
-            # TODO - Use "Q notation" calculations to make it float-safe
-            # I understand that this is supposed to average price over time...
-            # But it doesn't seem cumulative (i.e summing time-series information)
-            Pairs[tau.name, token.name, 'tau_price_cumulative_last'] = int(Pairs[tau.name, token.name, 'token_reserve'] / Pairs[tau.name, token.name, 'tau_reserve']) * time_elapsed
-            Pairs[tau.name, token.name, 'token_price_cumulative_last'] = int(Pairs[tau.name, token.name, 'tau_reserve'] / Pairs[tau.name, token.name, 'token_reserve']) * time_elapsed
+@export
+def fee_to_setter():
+    return fee_to_setter.get()
 
-        Pairs[tau.name, token.name, 'tau_reserve'] = tau_balance
-        Pairs[tau.name, token.name, 'token_reserve'] = token_balance
-        Pairs[tau.name, token.name, 'block_ts_last'] = block_ts
+# Create pair before doing anything else
+@export
+def create_pair(dex_pairs: str, tau_contract: str, token_contract: str):
+    # Make sure that what is imported is actually a valid token
+    assert tau_contract != token_contract
 
-        # emit Sync(reserve0, reserve1);
+    pairs = get_dex_pairs_interface(dex_pairs)
+    assert pairs.pair(tau_contract, token_contract) is None, 'Market already exists!'
 
-    # .SOL -> Lamden
-    # amount0Out -> tau_out
-    # amount1Out -> token_out
-    # Ported from UniswapV2Pair.sol @ line 159
-    # // this low-level function should be called from a contract which performs important safety checks
-    # function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-    def swap(tau_contract:str, token_contract: str, tau_out: float, token_out: float, to: str):
+    # 1 - Create the pair
+    # TODO - A4 - Make pair lookup, work vice/versa
+    pairs.initialize(tau_contract, token_contract)
 
-        assert not (tau_out > 0 and token_out > 0), 'Two coin Outputs'
-        assert tau_out > 0 or token_out > 0, 'Insufficient Ouput Amount'
-        tau, token = get_token_interface(tau_contract, token_contract)
+    # TODO - B1 - Support new functionality
+    # 2 - Adds liquidity if provided
+    # if (not tau_in is None and tau_in > 0) and (not token_in is None and token_in > 0) :
+    #     add_liquidity(
+    #         dex_pairs=dex_pairs,
+    #         tau_contract=tau_contract,
+    #         token_contract=token_contract,
+    #         tau_in=tau_in,
+    #         token_in=token_in)
 
-        tau_reserve = Pairs[tau.name, token.name, 'tau_reserve']
-        token_reserve = Pairs[tau.name, token.name, 'token_reserve']
+# DONE - A1 - Add liquidity needs to implement add_liquidity + mint_liquidity
+# DONE - A1 - Add liquidity needs to implement remove_liquidity + burn_liquidity
+# Route01 Fn
+# Pair must exist before liquidity can be added
+@export
+def add_liquidity(dex_pairs: str, tau_contract: str, token_contract: str, tau_in: int, token_in: int):
+    assert token_in > 0
+    assert tau_in > 0
 
-        assert tau_reserve > tau_out and token_reserve > token_out, 'UniswapV2: Inssuficient Liquidity'
+    # Make sure that what is imported is actually a valid token
+    tau, token = get_token_interface(tau_contract, token_contract)
+    assert tau_contract != token_contract
 
-        # TODO - A2 - Why is this called BEFORE downstream asserts?
-        # TODO - A2 - How is SOL.safe_transfer() != TAU.transfer_from()
-        if (tau_out > 0):
-            tau.transfer_from(ctx.this, to, tau_out)
+    pairs = get_dex_pairs_interface(dex_pairs)
+    assert not pairs.pair(tau_contract, token_contract) is None, 'Market does not exist!'
 
-        if (token_out > 0):
-            token.transfer_from(ctx.this, to, token_out)
+    # 1 - This contract will own all amounts sent to it
+    tau.transfer(tau_in, ctx.this)
+    token.transfer(token_in, ctx.this)
 
-        # TODO - B1 - Identify this call from UniV2
-        # if (data.length > 0) IUniswapV2Callee(to).uniswapV2Call(msg.sender, amount0Out, amount1Out, data);
+    # Track liquidity provided by signer
+    # TODO - If we care about "% pool" This needs to remain updated as market swings along X,Y
+    if pairs[tau_contract, token_contract, ctx.signer] is None :
+        pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] = tau_in
+        pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] = token_in
+    else :
+        pairs[tau_contract, token_contract, 'tau_liquidity', ctx.signer] += tau_in
+        pairs[tau_contract, token_contract, 'token_liquidity', ctx.signer] += token_in
 
-        tau_balance = tau.balance_of(this.ctx)
-        token_balance = token.balance_of(this.ctx)
-
-        tau_in = tau_balance - (tau_reserve - tau_out) if tau_balance > tau_reserve - tau_out else 0
-        token_in = token_balance - (token_reserve - token_out) if token_balance > token_reserve - token_out else 0
-
-        assert tau_in > 0 or token_in > 0, 'UniswapV2: Insufficient Input Amount'
-
-        # TODO - A1/A2 - Deconstruct Curve Adjustment Calculation
-        # ... I'm not sure why balances are being multiplied by 1000, then 3...
-        # I'm guessing this has something to do with smoothing the balance curve
-        tau_balance_adjusted = (tau_balance*1000) - (tau_in*3)
-        token_balance_adjusted = (token_balance*1000) - (token_in*3)
-
-        assert tau_balance_adjusted * token_balance_adjusted >= (tau_reserve * token_reserve) * (1000^2), 'UniswapV2: Exception: K'
-
-        # TODO - A1/A2 - Implement update function
-        update(tau_balance, token_balance, tau_reserve, token_reserve)
-
-        # TODO - B2 - Event Emitters?
-        # emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
-
-    # Simple getter
-    @export
-    def get_length_pairs():
-        arr = [1,2]
-        return len(arr)
-
-    @export
-    def token_swap(tau_contract:str, token_contract:str, tau_in: float, token_in: float):
-        assert tau_in > 0 or token_in > 0, 'Invalid amount!'
-        assert not tau_in > 0 and token_in > 0, 'Swap only accepts one currecy!'
-        assert Pairs[tau_contract, token_contract] is not None, 'Invalid token ID!'
-
-        assert Pairs[tau_contract, token_contract, 'tau_reserve'] > 0
-        assert Pairs[tau_contract, token_contract, 'token_reserve'] > 0
-
-        tau_reserve_new, token_reserve_new, tau_out, token_out, tau_slippage, token_slippage = get_trade_details()
-
-        tau, token = get_token_interface(tau_contract, token_contract)
-        swap(tau_contract, token_contract, tau_out, token_out)
-
-    @export
-    def create_pair(tau_contract: str, token_contract: str, tau_amount: int, token_amount: int):
-        assert token_amount > 0
-        assert tau_amount > 0
-
-        # Make sure that what is imported is actually a valid token
-        tau = I.import_module(tau_contract)
-        assert I.enforce_interface(tau, token_interface), 'Token contract does not meet the required interface'
-
-        token = I.import_module(token_contract)
-        assert I.enforce_interface(token, token_interface), 'Token contract does not meet the required interface'
-
-        assert token.name != tau.name
-        assert Pairs[token.name] is None, 'Market already exists!'
-
-        # 1 - This contract will own all amounts sent to it
-        token.transfer_from(ctx.sender, ctx.this, token_amount)
-        tau.transfer_from(ctx.sender, ctx.this, tau_amount)
-
-        update(tau.balance_of(ctx.this), token.balance_of(ctx.this), tau_amount, token_amount)
+    # I'm assuming registry of [ctx.this,ctx.investor,amount] is done via LP
+    update(
+        tau,
+        token,
+        tau.balance_of(ctx.this),
+        token.balance_of(ctx.this),
+        pairs[tau.token_name(), token.token_name(), 'tau_reserve'],
+        pairs[tau.token_name(), token.token_name(), 'token_reserve']
+    )
